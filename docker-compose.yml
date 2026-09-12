@@ -1,0 +1,28 @@
+services:
+  web:
+    build:
+      context: .
+      target: web
+    image: registration-relay-board-web
+    ports:
+      # WEB_PORT 可覆盖宿主端口，默认 8080；容器内固定 4173
+      - "${WEB_PORT:-8080}:4173"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4173/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+  # 一次性验收服务：跑完类型检查、Vitest、Playwright 即退出
+  verify:
+    build:
+      context: .
+      target: verify
+    image: registration-relay-board-verify
+    depends_on:
+      web:
+        condition: service_healthy
+    environment:
+      PLAYWRIGHT_BASE_URL: http://web:4173
+    restart: "no"

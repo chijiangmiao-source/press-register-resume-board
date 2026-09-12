@@ -1,0 +1,110 @@
+import { STORAGE_VERSION, STEPS } from './steps'
+import { isValidStoredOffset } from './validation'
+import type { LoadState, Measurement, PlateId, CornerId, SessionData, StepDef } from './types'
+
+const PLATES: readonly PlateId[] = ['cyan', 'magenta']
+const CORNERS: readonly CornerId[] = ['tl', 'tr', 'br', 'bl']
+
+function isPlate(v: unknown): v is PlateId {
+  return typeof v === 'string' && (PLATES as readonly string[]).includes(v)
+}
+
+function isCorner(v: unknown): v is CornerId {
+  return typeof v === 'string' && (CORNERS as readonly string[]).includes(v)
+}
+
+function isMeasurement(v: unknown): v is Measurement {
+  if (typeof v !== 'object' || v === null) return false
+  const m = v as Record<string, unknown>
+  return isValidStoredOffset(m.x) && isValidStoredOffset(m.y)
+}
+
+function isStepDef(v: unknown, index: number): v is StepDef {
+  if (typeof v !== 'object' || v === null) return false
+  const s = v as Record<string, unknown>
+  const expected = STEPS[index]
+  return (
+    s.index === expected.index &&
+    isPlate(s.plate) &&
+    s.plate === expected.plate &&
+    isCorner(s.corner) &&
+    s.corner === expected.corner
+  )
+}
+
+function invalid(message: string): LoadState {
+  return { kind: 'error', reason: 'invalid', message }
+}
+
+/**
+ * 严格校验并恢复一条本地检查点记录。
+ * 任何字段缺失、类型不符、版本不匹配、步数/已提交长度异常，
+ * 都返回明确错误，绝不猜测当前应停在哪一步。
+ */
+export function parsePersistedRecord(raw: unknown): LoadState {
+  if (typeof raw !== 'object' || raw === null) {
+    return invalid('本地检查点不是有效的记录对象，已停止恢复，避免错用旧读数。')
+  }
+  const data = raw as Record<string, unknown>
+
+  if (!('version' in data)) {
+    return invalid('本地检查点缺少版本号，无法确认数据结构，已阻断续作。')
+  }
+  if (typeof data.version !== 'number' || !Number.isInteger(data.version)) {
+    return invalid('本地检查点版本号损坏，已阻断续作。')
+  }
+  if (data.version !== STORAGE_VERSION) {
+    return {
+      kind: 'error',
+      reason: 'invalid',
+      message: `本地检查点版本不匹配（记录为 v${data.version}，当前需要 v${STORAGE_VERSION}），不能猜测进度，已阻断续作。`
+    }
+  }
+
+  if (typeof data.sessionId !== 'string' || data.sessionId.trim() === '') {
+    return invalid('本地检查点缺少有效的会话编号。')
+  }
+  if (typeof data.createdAt !== 'number' || !Number.isFinite(data.createdAt)) {
+    return invalid('本地检查点创建时间损坏，已阻断续作。')
+  }
+  if (!Array.isArray(data.steps) || data.steps.length !== STEPS.length) {
+    return invalid('本地检查点的八步定义缺失或数量不对，已阻断续作。')
+  }
+  if (!data.steps.every((step, i) => isStepDef(step, i))) {
+    return invalid('本地检查点的八步定义与现行测量顺序不符，已阻断续作。')
+  }
+  if (!Array.isArray(data.values)) {
+    return invalid('本地检查点缺少已提交测量值，已阻断续作。')
+  }
+  if (data.values.length > STEPS.length) {
+    return invalid('本地检查点的已提交值超过八步，记录已损坏，已阻断续作。')
+  }
+  if (!data.values.every(isMeasurement)) {
+    return invalid('本地检查点中存在非法偏移读数（范围或精度不符），已阻断续作。')
+  }
+
+  const session: SessionData = {
+    version: data.version,
+    sessionId: data.sessionId,
+    createdAt: data.createdAt,
+    steps: data.steps.map((s) => ({ ...(s as StepDef) })),
+    values: data.values.map((m) => ({ ...(m as Measurement) }))
+  }
+  return { kind: 'ready', session }
+}
+
+/** 把 localStorage 文本恢复为状态：空仓库 / 可继续会话 / 明确错误。 */
+export function restoreFromText(text: string | null): LoadState {
+  if (text === null) return { kind: 'empty' }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(text)
+  } catch {
+    return {
+      kind: 'error',
+      reason: 'unparseable',
+      message: '本地检查点已损坏，无法解析为 JSON，已阻断续作。请重置后开始新会话。'
+    }
+  }
+  return parsePersistedRecord(parsed)
+}
