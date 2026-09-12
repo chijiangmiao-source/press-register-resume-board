@@ -36,7 +36,7 @@ const progressItems = computed(() =>
     index: i,
     plate: plateLabel(step.plate),
     corner: cornerLabel(step.corner),
-    done: session.value ? i < session.value.values.length : false,
+    done: session.value ? i < session.value.nextIndex : false,
     active: session.value !== undefined && i === nextIndex.value && !isComplete.value
   }))
 )
@@ -78,7 +78,7 @@ const progressItems = computed(() =>
           <div class="meta-row">
             <span class="meta-label">检查点</span>
             <span data-testid="checkpoint-info">
-              已完成 {{ session.values.length }} / 8 步
+              已完成 {{ session.nextIndex }} / 8 步
               <template v-if="!isComplete && currentStep">
                 ，下一步：{{ plateLabel(currentStep.plate) }} · {{ cornerLabel(currentStep.corner) }}
               </template>

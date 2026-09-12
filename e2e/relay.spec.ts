@@ -80,7 +80,13 @@ test.describe('四色套准复测接力板', () => {
     await expect(page.getByTestId('checkpoint-info')).toContainText('已完成 2 / 8 步')
     await expect(page.getByTestId('session-id')).toHaveAttribute('title', sessionId!)
 
-    // 已提交旧读数原样保留、不可回改
+    // 下一步索引是独立落盘字段，不靠旧读数数量反推
+    const persisted = await page.evaluate((key) => {
+      const raw = localStorage.getItem(key)
+      return raw ? (JSON.parse(raw) as { nextIndex: number; values: unknown[] }) : null
+    }, STORAGE_KEY)
+    expect(persisted?.nextIndex).toBe(2)
+    expect(persisted?.values).toHaveLength(2)    // 已提交旧读数原样保留、不可回改
     await expect(page.getByTestId('history-row-0')).toContainText('+0.10')
     await expect(page.getByTestId('history-row-1')).toContainText('+0.20')
     await expect(page.getByTestId('current-point')).toContainText('青版')
@@ -146,12 +152,55 @@ test.describe('四色套准复测接力板', () => {
           sessionId: 'legacy',
           createdAt: Date.now(),
           steps: [],
-          values: []
+          values: [],
+          nextIndex: 0
         })
       )
     }, STORAGE_KEY)
     await page.reload()
     await expect(page.getByTestId('blocked-message')).toContainText('版本不匹配')
+    await expect(page.getByTestId('measure-panel')).toHaveCount(0)
+  })
+
+  test('旧版记录（无独立下一步索引）：报版本错误，不能按读数数量猜进度', async ({ page }) => {
+    await page.evaluate((key) => {
+      // 模拟 v1 记录：只有 values，没有 nextIndex
+      const steps = [
+        ['cyan', 'tl'], ['cyan', 'tr'], ['cyan', 'br'], ['cyan', 'bl'],
+        ['magenta', 'tl'], ['magenta', 'tr'], ['magenta', 'br'], ['magenta', 'bl']
+      ].map(([plate, corner], index) => ({ index, plate, corner }))
+      localStorage.setItem(
+        key,
+        JSON.stringify({
+          version: 1,
+          sessionId: 'legacy-session',
+          createdAt: Date.now(),
+          steps,
+          values: [{ x: 0.1, y: 0 }]
+        })
+      )
+    }, STORAGE_KEY)
+    await page.reload()
+    await expect(page.getByTestId('blocked-panel')).toBeVisible()
+    await expect(page.getByTestId('blocked-message')).toContainText('版本不匹配')
+  })
+
+  test('下一步索引与读数数量不一致：明确阻断，不按读数数量反推进度', async ({ page }) => {
+    await startSession(page)
+    await submitStep(page, '0.10', '0.00')
+    await submitStep(page, '0.10', '0.00')
+
+    // 篡改独立落盘的下一步索引（读数仍是 2 条）
+    await page.evaluate((key) => {
+      const raw = localStorage.getItem(key)
+      const data = JSON.parse(raw ?? '{}') as { nextIndex: number }
+      data.nextIndex = 5
+      localStorage.setItem(key, JSON.stringify(data))
+    }, STORAGE_KEY)
+
+    await page.reload()
+    await expect(page.getByTestId('blocked-panel')).toBeVisible()
+    await expect(page.getByTestId('blocked-message')).toContainText('不一致')
     await expect(page.getByTestId('measure-panel')).toHaveCount(0)
   })
 

@@ -12,8 +12,10 @@ TypeScript + Vue 3 + Vite，无业务后端、不访问任何在线服务。一�
   - 范围 **−2.00 ~ +2.00 mm**，精确到 **0.01 mm**；
   - **两个值都合法才推进**；任一非法则行内报错，不前进、不写检查点。
 - **已提交步骤不可回改**。
-- 每次推进后，会话编号、八步定义、已提交值与下一步索引通过**一次** `setItem`
-  原子写入 `localStorage`（键：`registration-relay-board:session:v1`）。
+- 每次推进后，会话编号、八步定义、已提交值与**独立保存的下一步索引 `nextIndex`**
+  通过**一次** `setItem` 原子写入 `localStorage`（键：`registration-relay-board:session`，
+  当前结构版本 v2）。进度直接读取 `nextIndex`，不按已提交读数数量反推；
+  恢复时还会校验 `nextIndex === values.length`，不一致即判定记录损坏。
 - 八步完成后：
   - 所有 |X|、|Y| 均 **≤ 0.15 mm** → 显示 **“可开印”**；
   - 否则显示 **“需复调”**，并按测量顺序列出全部超差色版、角点及超差轴偏移。

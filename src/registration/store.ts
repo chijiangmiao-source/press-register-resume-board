@@ -50,12 +50,15 @@ export class RegistrationStore {
     return this.state.kind === 'ready' ? cloneSession(this.state.session) : undefined
   }
 
+  /** 下一步索引直接读取独立落盘字段，不按已提交值数量反推。 */
   get nextIndex(): number {
-    return this.state.kind === 'ready' ? this.state.session.values.length : -1
+    return this.state.kind === 'ready' ? this.state.session.nextIndex : -1
   }
 
   get isComplete(): boolean {
-    return this.state.kind === 'ready' && this.state.session.values.length === STEPS.length
+    return (
+      this.state.kind === 'ready' && this.state.session.nextIndex === STEPS.length
+    )
   }
 
   /**
@@ -72,7 +75,8 @@ export class RegistrationStore {
       sessionId: createSessionId(),
       createdAt: now(),
       steps: STEPS.map((step) => ({ ...step })),
-      values: []
+      values: [],
+      nextIndex: 0
     }
     this.persist(session)
     this.state = { kind: 'ready', session }
@@ -95,7 +99,7 @@ export class RegistrationStore {
       }
     }
     const session = this.state.session
-    if (session.values.length >= STEPS.length) {
+    if (session.nextIndex >= STEPS.length) {
       return { ok: false, errors: { x: '八步测量已全部完成，提交已锁定，不可回改。' } }
     }
 
@@ -114,7 +118,8 @@ export class RegistrationStore {
     const measurement: Measurement = { x: x.value, y: y.value }
     const next: SessionData = {
       ...cloneSession(session),
-      values: [...session.values, measurement]
+      values: [...session.values, measurement],
+      nextIndex: session.nextIndex + 1
     }
     this.persist(next)
     this.state = { kind: 'ready', session: next }
@@ -129,7 +134,7 @@ export class RegistrationStore {
 
   /** 八步全部完成后的放行结论；未完成不给出结论。 */
   getVerdict(): Verdict | undefined {
-    if (this.state.kind !== 'ready' || this.state.session.values.length !== STEPS.length) {
+    if (this.state.kind !== 'ready' || this.state.session.nextIndex !== STEPS.length) {
       return undefined
     }
     const deviations: Deviation[] = []
@@ -160,7 +165,8 @@ function cloneSession(session: SessionData): SessionData {
     sessionId: session.sessionId,
     createdAt: session.createdAt,
     steps: session.steps.map((step) => ({ ...step })),
-    values: session.values.map((m) => ({ ...m }))
+    values: session.values.map((m) => ({ ...m })),
+    nextIndex: session.nextIndex
   }
 }
 

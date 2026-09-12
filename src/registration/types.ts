@@ -43,8 +43,13 @@ export interface SessionData {
   createdAt: number
   /** 八步固定定义冗余存档，恢复时与现行定义逐一核对。 */
   steps: StepDef[]
-  /** 已提交值，长度即已完成步数；下一步索引为 values.length。 */
+  /** 已提交值，顺序即测量顺序。 */
   values: Measurement[]
+  /**
+   * 下一步索引（0..8），独立落盘，不靠 values.length 反推。
+   * 恢复时必须满足 nextIndex === values.length，否则视为损坏记录。
+   */
+  nextIndex: number
 }
 
 /** 恢复结果：空仓库、可继续的会话、或损坏/不兼容记录。 */

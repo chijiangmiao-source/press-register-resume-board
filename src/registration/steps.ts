@@ -1,10 +1,14 @@
 import type { CornerId, PlateId, StepDef } from './types'
 
-/** 当前持久化结构版本。版本不一致的旧记录一律拒绝恢复。 */
-export const STORAGE_VERSION = 1
+/**
+ * 当前持久化结构版本。
+ * v2：nextIndex 独立落盘（v1 仅靠 values.length 反推）。
+ * 版本不一致的旧记录一律拒绝恢复。
+ */
+export const STORAGE_VERSION = 2
 
-/** localStorage 键名（固定，便于验收脚本预置损坏数据）。 */
-export const STORAGE_KEY = 'registration-relay-board:session:v1'
+/** localStorage 键名（跨版本保持固定，便于检出并上报旧版记录）。 */
+export const STORAGE_KEY = 'registration-relay-board:session'
 
 /** 允许录入的偏移范围（mm）。 */
 export const OFFSET_MIN = -2.0

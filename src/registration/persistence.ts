@@ -82,13 +82,30 @@ export function parsePersistedRecord(raw: unknown): LoadState {
   if (!data.values.every(isMeasurement)) {
     return invalid('本地检查点中存在非法偏移读数（范围或精度不符），已阻断续作。')
   }
+  // nextIndex 是独立字段，不能由已提交值数量反推；
+  // 类型/范围不符、或与已提交值数量不一致，都按损坏处理而不是猜测进度。
+  if (
+    typeof data.nextIndex !== 'number' ||
+    !Number.isInteger(data.nextIndex) ||
+    data.nextIndex < 0 ||
+    data.nextIndex > STEPS.length
+  ) {
+    return invalid('本地检查点的下一步索引损坏，已阻断续作。')
+  }
+  if (data.nextIndex !== data.values.length) {
+    return invalid(
+      `本地检查点的下一步索引（${data.nextIndex}）与已提交读数数量（${data.values.length}）不一致，` +
+        '记录已损坏，不能猜测进度，已阻断续作。'
+    )
+  }
 
   const session: SessionData = {
     version: data.version,
     sessionId: data.sessionId,
     createdAt: data.createdAt,
     steps: data.steps.map((s) => ({ ...(s as StepDef) })),
-    values: data.values.map((m) => ({ ...(m as Measurement) }))
+    values: data.values.map((m) => ({ ...(m as Measurement) })),
+    nextIndex: data.nextIndex
   }
   return { kind: 'ready', session }
 }

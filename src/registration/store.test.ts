@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { RegistrationStore, type KvStore } from './store'
 import { STORAGE_KEY, STORAGE_VERSION, STEPS } from './steps'
-import type { SessionData } from './types'
+import type { Measurement, SessionData } from './types'
 
 class FakeKv implements KvStore {
   data = new Map<string, string>()
@@ -31,6 +31,19 @@ function makeStore(): RegistrationStore {
   return new RegistrationStore(kv)
 }
 
+/** 构造一条结构完整的 v2 记录，损坏用例在其上做局部篡改。 */
+function validRecord(overrides: Partial<SessionData> = {}): SessionData {
+  return {
+    version: STORAGE_VERSION,
+    sessionId: 's1',
+    createdAt: 1,
+    steps: STEPS.map((s) => ({ ...s })),
+    values: [],
+    nextIndex: 0,
+    ...overrides
+  }
+}
+
 beforeEach(() => {
   kv = new FakeKv()
   store = makeStore()
@@ -50,10 +63,12 @@ describe('空仓库与新会话', () => {
     expect(session.createdAt).toBe(1_700_000_000_000)
     expect(session.steps).toHaveLength(8)
     expect(session.values).toEqual([])
+    expect(session.nextIndex).toBe(0)
     expect(store.nextIndex).toBe(0)
     const persisted = kv.raw() as SessionData
     expect(persisted.steps).toHaveLength(8)
     expect(persisted.values).toEqual([])
+    expect(persisted.nextIndex).toBe(0)
   })
 
   it('会话编号、步骤定义与写入落盘', () => {
@@ -79,23 +94,27 @@ describe('状态迁移：八步依次推进', () => {
     store.begin(true)
   })
 
-  it('合法双值推进，下一步索引递增且落盘', () => {
+  it('合法双值推进，下一步索引作为独立字段递增且落盘', () => {
     const r = store.advance('0.10', '-0.05')
     expect(r.ok).toBe(true)
     expect(store.nextIndex).toBe(1)
     const persisted = kv.raw() as SessionData
     expect(persisted.values).toEqual([{ x: 0.1, y: -0.05 }])
     expect(persisted.values).toHaveLength(1)
+    expect(persisted.nextIndex).toBe(1)
   })
 
-  it('走完八步后完成，values 长度为 8', () => {
+  it('走完八步后完成，nextIndex=8 与 8 条读数同时落盘', () => {
     for (let i = 0; i < 8; i++) {
       const r = store.advance('0.01', '-0.02')
       expect(r.ok, `step ${i} should advance`).toBe(true)
       expect(store.nextIndex).toBe(i + 1)
+      expect((kv.raw() as SessionData).nextIndex).toBe(i + 1)
     }
     expect(store.isComplete).toBe(true)
-    expect((kv.raw() as SessionData).values).toHaveLength(8)
+    const persisted = kv.raw() as SessionData
+    expect(persisted.values).toHaveLength(8)
+    expect(persisted.nextIndex).toBe(8)
   })
 
   it('每次推进只发生一次原子写入', () => {
@@ -137,6 +156,7 @@ describe('拒绝非法推进（不可回改 / 不可猜测）', () => {
     expect(store.nextIndex).toBe(0)
     expect(kv.writes).toBe(writesBefore)
     expect((kv.raw() as SessionData).values).toEqual([])
+    expect((kv.raw() as SessionData).nextIndex).toBe(0)
   })
 
   it('非法推进返回逐轴错误原因', () => {
@@ -192,6 +212,24 @@ describe('刷新/重开后的检查点恢复', () => {
     expect(reopened.isComplete).toBe(true)
     expect(reopened.getVerdict()?.pass).toBe(true)
   })
+
+  it('持久化的下一步索引被单独篡改后，恢复必须阻断而非按读数数量反推', () => {
+    store.begin(true)
+    store.advance('0.10', '0.10')
+    store.advance('0.10', '0.10')
+
+    // 直接篡改落盘文本中的 nextIndex（读数仍是 2 条）
+    const tampered = JSON.parse(kv.data.get(STORAGE_KEY) as string) as SessionData
+    tampered.nextIndex = 5
+    kv.data.set(STORAGE_KEY, JSON.stringify(tampered))
+
+    const reopened = makeStore()
+    const state = reopened.getState()
+    expect(state.kind).toBe('error')
+    if (state.kind === 'error') expect(state.message).toContain('不一致')
+    expect(reopened.getSession()).toBeUndefined()
+    expect(reopened.nextIndex).toBe(-1)
+  })
 })
 
 describe('损坏 / 版本不匹配记录', () => {
@@ -212,72 +250,83 @@ describe('损坏 / 版本不匹配记录', () => {
     expect(broken.nextIndex).toBe(-1)
   })
 
-  it('版本不匹配：明确报版本错误，拒绝猜测进度', () => {
-    const good = JSON.stringify({
-      ...({
-        version: STORAGE_VERSION,
-        sessionId: 's1',
-        createdAt: 1,
-        steps: STEPS.map((s) => ({ ...s })),
-        values: []
-      } as SessionData),
-      version: 999
+  it('版本不匹配：明确报版本错误，拒绝猜测进度（含旧版无 nextIndex 的记录）', () => {
+    // 模拟 v1 旧记录：没有独立 nextIndex 字段
+    const legacy = JSON.stringify({
+      version: 1,
+      sessionId: 'legacy-session',
+      createdAt: 1,
+      steps: STEPS.map((s) => ({ ...s })),
+      values: [{ x: 0.1, y: 0 }]
     })
-    const v = seed(good).getState()
+    const v = seed(legacy).getState()
     expect(v.kind).toBe('error')
     if (v.kind === 'error') expect(v.message).toContain('版本不匹配')
+
+    // 未来版本同样拒绝
+    const future = JSON.stringify(validRecord({ version: 999 }))
+    const v2 = seed(future).getState()
+    expect(v2.kind).toBe('error')
+    if (v2.kind === 'error') expect(v2.message).toContain('版本不匹配')
   })
 
   it.each([
-    ['缺步骤', { version: STORAGE_VERSION, sessionId: 's', createdAt: 1, values: [] }],
-    ['缺值数组', { version: STORAGE_VERSION, sessionId: 's', createdAt: 1, steps: STEPS }],
+    ['缺步骤', validRecord({ steps: [] as SessionData['steps'] })],
+    ['缺值数组', validRecord({ values: undefined as unknown as Measurement[] })],
+    ['缺下一步索引', validRecord({ nextIndex: undefined as unknown as number })],
     [
       '步骤定义被调换',
-      {
-        version: STORAGE_VERSION,
-        sessionId: 's',
-        createdAt: 1,
-        steps: STEPS.map((s, i) => ({ ...s, index: 7 - i })),
-        values: []
-      }
+      validRecord({ steps: STEPS.map((s, i) => ({ ...s, index: 7 - i })) })
     ],
     [
       '读数超范围',
-      {
-        version: STORAGE_VERSION,
-        sessionId: 's',
-        createdAt: 1,
-        steps: STEPS,
-        values: [{ x: 3, y: 0 }]
-      }
+      validRecord({ values: [{ x: 3, y: 0 }], nextIndex: 1 })
     ],
     [
       '读数精度非法',
-      {
-        version: STORAGE_VERSION,
-        sessionId: 's',
-        createdAt: 1,
-        steps: STEPS,
-        values: [{ x: 0.001, y: 0 }]
-      }
+      validRecord({ values: [{ x: 0.001, y: 0 }], nextIndex: 1 })
     ],
     [
       '已提交值多于八步',
-      {
-        version: STORAGE_VERSION,
-        sessionId: 's',
-        createdAt: 1,
-        steps: STEPS,
-        values: Array.from({ length: 9 }, () => ({ x: 0, y: 0 }))
-      }
+      validRecord({
+        values: Array.from({ length: 9 }, () => ({ x: 0, y: 0 })),
+        nextIndex: 9
+      })
     ],
-    ['会话编号缺失', { version: STORAGE_VERSION, createdAt: 1, steps: STEPS, values: [] }],
+    [
+      '索引领先读数数量（有读数但索引跳号）',
+      validRecord({ values: [{ x: 0, y: 0 }], nextIndex: 3 })
+    ],
+    [
+      '索引落后读数数量（读数未丢但索引回退）',
+      validRecord({
+        values: [
+          { x: 0, y: 0 },
+          { x: 0, y: 0 }
+        ],
+        nextIndex: 1
+      })
+    ],
+    [
+      '索引为负数',
+      validRecord({ nextIndex: -1 })
+    ],
+    [
+      '索引超过八步',
+      validRecord({ values: [], nextIndex: 9 })
+    ],
+    [
+      '索引不是整数',
+      validRecord({ values: [{ x: 0, y: 0 }], nextIndex: 1.5 })
+    ],
+    ['会话编号缺失', validRecord({ sessionId: '' })],
     ['根节点是数组', []],
     ['根节点是字符串', 'oops']
   ])('%s：报错并阻断', (_name, record) => {
     const s = seed(JSON.stringify(record))
     expect(s.getState().kind).toBe('error')
     expect(s.getSession()).toBeUndefined()
+    expect(s.nextIndex).toBe(-1)
     expect(s.advance('0.00', '0.00').ok).toBe(false)
   })
 

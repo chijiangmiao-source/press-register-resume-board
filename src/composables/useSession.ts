@@ -20,8 +20,8 @@ export function useSession(store: RegistrationStore) {
   const draftY = ref('')
   const fieldError = reactive<FieldError>({})
 
-  const nextIndex = computed(() => session.value?.values.length ?? 0)
-  const isComplete = computed(() => session.value?.values.length === STEPS.length)
+  const nextIndex = computed(() => session.value?.nextIndex ?? 0)
+  const isComplete = computed(() => session.value?.nextIndex === STEPS.length)
   const verdict = ref<Verdict | undefined>(store.getVerdict())
 
   function syncFromStore(): void {
