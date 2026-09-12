@@ -21,6 +21,7 @@ const {
   nextIndex,
   isComplete,
   verdict,
+  diagnosis,
   startNewSession,
   resetCheckpoint,
   submitCurrent
@@ -102,6 +103,7 @@ const progressItems = computed(() =>
         <ResultPanel
           v-if="isComplete && verdict"
           :verdict="verdict"
+          :diagnosis="diagnosis"
           @restart="startNewSession"
         />
 

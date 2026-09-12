@@ -117,6 +117,58 @@ test.describe('四色套准复测接力板', () => {
     await expect(page.getByTestId('deviation-5')).toContainText('X = -0.16')
   })
 
+  test('需复调：逐版诊断随对应色版展示（整版平移给反方向建议，角点不一致不给建议）', async ({ page }) => {
+    await startSession(page)
+    // 青版四角一致 +0.20（X 超差但属整版平移）
+    for (let i = 0; i < 4; i++) await submitStep(page, '0.20', '0.00')
+    // 品红版：前三角 +0.01，第四角 X 突出 +0.20 → 角点不一致
+    for (let i = 0; i < 3; i++) await submitStep(page, '0.01', '0.00')
+    await submitStep(page, '0.20', '0.00')
+
+    await expect(page.getByTestId('verdict-title')).toHaveText('需复调')
+    // 超差清单仍按测量顺序：青版四角 1..4，品红第 8 步
+    const deviations = page.getByTestId(/^deviation-\d+$/)
+    await expect(deviations).toHaveCount(5)
+    const deviationIndexes = await deviations.evaluateAll((els) =>
+      els.map((el) => (el as HTMLElement).dataset.testid)
+    )
+    expect(deviationIndexes).toEqual([
+      'deviation-0',
+      'deviation-1',
+      'deviation-2',
+      'deviation-3',
+      'deviation-7'
+    ])
+
+    // 诊断区随原结论一并呈现，青版在前、品红版在后
+    const diag = page.getByTestId('plate-diagnosis')
+    await expect(diag).toBeVisible()
+    const cyan = page.getByTestId('diagnosis-cyan')
+    const magenta = page.getByTestId('diagnosis-magenta')
+    await expect(cyan).toContainText('青版')
+    await expect(magenta).toContainText('品红版')
+
+    // 青版：整版平移，建议与均值方向相反，按 0.01 给出；无负零
+    await expect(page.getByTestId('diagnosis-kind-cyan')).toContainText('整版平移')
+    await expect(page.getByTestId('diagnosis-mean-cyan')).toContainText('X = +0.20')
+    await expect(page.getByTestId('diagnosis-mean-cyan')).toContainText('Y = +0.00')
+    await expect(page.getByTestId('advice-x-cyan')).toHaveText('X 调 -0.20 mm')
+    await expect(page.getByTestId('advice-y-cyan')).toHaveText('Y 调 +0.00 mm')
+
+    // 品红版：角点不一致，只给复测提示，不输出任何可能误导的调整量
+    await expect(page.getByTestId('diagnosis-kind-magenta')).toContainText('角点不一致，需逐角复测')
+    await expect(page.getByTestId('advice-x-magenta')).toHaveCount(0)
+    await expect(page.getByTestId('advice-y-magenta')).toHaveCount(0)
+  })
+
+  test('可开印结论下不展示复调诊断建议', async ({ page }) => {
+    await startSession(page)
+    for (let i = 0; i < 8; i++) await submitStep(page, '0.00', '0.00')
+    await expect(page.getByTestId('verdict-title')).toHaveText('可开印')
+    await expect(page.getByTestId('plate-diagnosis')).toHaveCount(0)
+    await expect(page.getByTestId('deviation-list')).toHaveCount(0)
+  })
+
   test('损坏的本地记录：明确阻断，重置后才能开始新会话', async ({ page }) => {
     await page.evaluate((key) => {
       localStorage.setItem(key, '{这不是JSON')

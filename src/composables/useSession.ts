@@ -2,6 +2,7 @@ import { computed, reactive, ref } from 'vue'
 import { RegistrationStore } from '../registration/store'
 import { STEPS, TOLERANCE } from '../registration/steps'
 import type { LoadState, SessionData, Verdict } from '../registration/types'
+import type { RegistrationDiagnosis } from '../registration/diagnosis'
 
 export interface FieldError {
   x?: string
@@ -23,11 +24,13 @@ export function useSession(store: RegistrationStore) {
   const nextIndex = computed(() => session.value?.nextIndex ?? 0)
   const isComplete = computed(() => session.value?.nextIndex === STEPS.length)
   const verdict = ref<Verdict | undefined>(store.getVerdict())
+  const diagnosis = ref<RegistrationDiagnosis | undefined>(store.getDiagnosis())
 
   function syncFromStore(): void {
     loadState.value = store.getState()
     session.value = store.getSession()
     verdict.value = store.getVerdict()
+    diagnosis.value = store.getDiagnosis()
   }
 
   /** 新会话：界面必须先经 confirm 确认，才会清除旧检查点。 */
@@ -78,6 +81,7 @@ export function useSession(store: RegistrationStore) {
     nextIndex,
     isComplete,
     verdict,
+    diagnosis,
     tolerance: TOLERANCE,
     startNewSession,
     resetCheckpoint,

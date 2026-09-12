@@ -384,3 +384,69 @@ describe('放行结论（阈值 0.15mm）', () => {
     expect(verdict?.deviations[2].axes).toEqual(['x', 'y'])
   })
 })
+
+describe('复调诊断（八步完成后基于只读测量值生成）', () => {
+  beforeEach(() => {
+    store.begin(true)
+  })
+
+  it('未完成会话不生成诊断', () => {
+    store.advance('0.20', '0.20')
+    expect(store.getDiagnosis()).toBeUndefined()
+  })
+
+  it('损坏/旧检查点不生成诊断', () => {
+    const legacy = JSON.stringify({
+      version: 1,
+      sessionId: 'legacy-session',
+      createdAt: 1,
+      steps: STEPS.map((s) => ({ ...s })),
+      values: [{ x: 0.1, y: 0 }]
+    })
+    kv.data.set(STORAGE_KEY, legacy)
+    const reopened = makeStore()
+    expect(reopened.getDiagnosis()).toBeUndefined()
+  })
+
+  it('完成后逐版诊断：青版整版平移给建议，品红版角点不一致不给建议', () => {
+    const inputs: Array<[string, string]> = [
+      // 青版四角一致 +0.20（超差但平移）
+      ['0.20', '0.00'],
+      ['0.20', '0.00'],
+      ['0.20', '0.00'],
+      ['0.20', '0.00'],
+      // 品红版角点不一致（第四角 X 突出）
+      ['0.01', '0.00'],
+      ['0.01', '0.00'],
+      ['0.01', '0.00'],
+      ['0.20', '0.00']
+    ]
+    for (const [x, y] of inputs) expect(store.advance(x, y).ok).toBe(true)
+
+    const diag = store.getDiagnosis()
+    expect(diag?.plates).toHaveLength(2)
+    const cyan = diag?.plates[0]
+    const magenta = diag?.plates[1]
+    expect(cyan?.plate).toBe('cyan')
+    expect(cyan?.uniform).toBe(true)
+    expect(cyan?.advice).toEqual({ x: -0.2, y: 0 })
+    expect(magenta?.plate).toBe('magenta')
+    expect(magenta?.uniform).toBe(false)
+    expect(magenta?.advice).toBeNull()
+  })
+
+  it('诊断为只读派生结果：调用前后检查点字段与版本结构完全不变', () => {
+    for (let i = 0; i < 8; i++) store.advance('0.20', '0.00')
+    const before = kv.getItem(STORAGE_KEY)
+    const parsedBefore = JSON.parse(before as string) as Record<string, unknown>
+    // 既有 v2 结构只有这六个字段，诊断不允许落盘任何新字段。
+    expect(Object.keys(parsedBefore).sort()).toEqual(
+      ['createdAt', 'nextIndex', 'sessionId', 'steps', 'values', 'version'].sort()
+    )
+    expect(parsedBefore.version).toBe(STORAGE_VERSION)
+
+    store.getDiagnosis()
+    store.getDiagnosis()
+    expect(kv.getItem(STORAGE_KEY)).toBe(before)
+  })
+})

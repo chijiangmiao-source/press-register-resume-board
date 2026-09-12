@@ -1,6 +1,7 @@
 import { STORAGE_KEY, STORAGE_VERSION, STEPS, TOLERANCE } from './steps'
 import { restoreFromText } from './persistence'
 import { parseOffset } from './validation'
+import { buildDiagnosis } from './diagnosis'
 import type {
   LoadState,
   Measurement,
@@ -8,6 +9,7 @@ import type {
   Verdict,
   Deviation
 } from './types'
+import type { RegistrationDiagnosis } from './diagnosis'
 
 /**
  * 最小键值存储抽象：浏览器使用 localStorage，单元测试使用内存假实现。
@@ -147,6 +149,18 @@ export class RegistrationStore {
       }
     })
     return { pass: deviations.length === 0, deviations }
+  }
+
+  /**
+   * 八步全部完成后的复调诊断（整版平移 / 角点不一致 + 校正建议）。
+   * 仅基于既有只读测量值现场生成，不写检查点、不改变任何既有字段；
+   * 未完成会话或记录损坏时返回 undefined。
+   */
+  getDiagnosis(): RegistrationDiagnosis | undefined {
+    if (this.state.kind !== 'ready' || this.state.session.nextIndex !== STEPS.length) {
+      return undefined
+    }
+    return buildDiagnosis(this.state.session.values)
   }
 
   private persist(session: SessionData): void {

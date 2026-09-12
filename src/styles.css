@@ -292,6 +292,71 @@ body {
   color: var(--danger);
 }
 
+.diagnosis {
+  border-top: 1px dashed var(--line);
+  margin-top: 4px;
+  padding-top: 12px;
+}
+
+.diagnosis-title {
+  margin: 0 0 10px;
+  font-size: 15px;
+}
+
+.diagnosis-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.diagnosis-item {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 10px 14px;
+}
+
+.diagnosis-uniform {
+  border-left: 4px solid var(--primary);
+}
+
+.diagnosis-inconsistent {
+  border-left: 4px solid var(--warn);
+  background: #fdf6ec;
+}
+
+.diagnosis-plate {
+  margin: 0 0 4px;
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: baseline;
+}
+
+.diagnosis-mean {
+  color: var(--muted);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.diagnosis-advice {
+  margin: 0;
+  line-height: 1.7;
+  font-size: 14px;
+}
+
+.diagnosis-inconsistent .diagnosis-kind {
+  color: var(--warn);
+  font-weight: 600;
+}
+
+.advice-axis {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
 .panel-danger {
   border-color: var(--danger);
   background: var(--danger-bg);
