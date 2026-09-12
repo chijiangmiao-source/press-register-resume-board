@@ -84,8 +84,10 @@ test.describe('四色套准复测接力板', () => {
     await expect(page.getByTestId('error-x')).toHaveCount(0)
     await expect(page.getByTestId('error-y')).toBeVisible()
 
-    // 再修正 Y 后正常提交推进
-    await page.getByTestId('input-y').fill('0.00')
+    // Y 改成另一种非法值时错误仍保留，恢复合法后才消失
+    await page.getByTestId('input-y').fill('0.001')
+    await expect(page.getByTestId('error-y')).toBeVisible()
+    await page.getByTestId('input-y').fill('-0.05')
     await expect(page.getByTestId('error-y')).toHaveCount(0)
     await page.getByTestId('submit-step').click()
     await expect(page.getByTestId('step-no')).toHaveText('第 2 / 8 步')

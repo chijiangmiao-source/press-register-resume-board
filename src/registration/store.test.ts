@@ -270,6 +270,26 @@ describe('损坏 / 版本不匹配记录', () => {
     if (v2.kind === 'error') expect(v2.message).toContain('版本不匹配')
   })
 
+  it('创建时间超出 Date 可表示范围：判损阻断，不恢复会话、不展示 NaN 时间', () => {
+    // 1e20 是有限数，但超出 Date 可表示范围（±8.64e15 ms），恢复后只能显示 NaN 时间
+    for (const createdAt of [1e20, -1e20, 8.64e15 + 1, -(8.64e15 + 1)]) {
+      const s = seed(JSON.stringify(validRecord({ createdAt })))
+      const state = s.getState()
+      expect(state.kind, `createdAt=${createdAt}`).toBe('error')
+      if (state.kind === 'error') expect(state.message).toContain('创建时间')
+      expect(s.getSession()).toBeUndefined()
+      expect(s.nextIndex).toBe(-1)
+    }
+  })
+
+  it('创建时间在 Date 可表示范围边界（±8.64e15）仍可正常恢复', () => {
+    for (const createdAt of [8.64e15, -8.64e15, 0]) {
+      const s = seed(JSON.stringify(validRecord({ createdAt })))
+      expect(s.getState().kind, `createdAt=${createdAt}`).toBe('ready')
+      expect(s.getSession()?.createdAt).toBe(createdAt)
+    }
+  })
+
   it.each([
     ['缺步骤', validRecord({ steps: [] as SessionData['steps'] })],
     ['缺值数组', validRecord({ values: undefined as unknown as Measurement[] })],

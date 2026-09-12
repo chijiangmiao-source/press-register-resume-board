@@ -31,6 +31,18 @@ afterEach(() => {
 })
 
 describe('行内错误随字段修正同步消失', () => {
+  it('没有旧错误时，合法输入变化不会产生错误提示', async () => {
+    store.begin(true)
+    const u = useSession(store)
+
+    u.draftX.value = '0.10'
+    u.draftY.value = '-0.05'
+    await nextTick()
+
+    expect(u.fieldError.x).toBeUndefined()
+    expect(u.fieldError.y).toBeUndefined()
+  })
+
   it('提交超范围 X 后把 X 改为合法值，旧错误立即消失，不等待再次提交', async () => {
     store.begin(true)
     const u = useSession(store)
