@@ -9,6 +9,19 @@ function isPlate(v: unknown): v is PlateId {
   return typeof v === 'string' && (PLATES as readonly string[]).includes(v)
 }
 
+/**
+ * 创建时间必须是有限数值且落在 Date 可表示范围内（约 ±8.64e15 毫秒）。
+ * 仅检查 Number.isFinite 不够：1e20 虽是有限数，但 new Date(1e20) 为
+ * Invalid Date，界面会渲染成 NaN-NaN-NaN，这类记录必须按损坏处理。
+ */
+function isRepresentableTime(v: unknown): v is number {
+  return (
+    typeof v === 'number' &&
+    Number.isFinite(v) &&
+    !Number.isNaN(new Date(v).getTime())
+  )
+}
+
 function isCorner(v: unknown): v is CornerId {
   return typeof v === 'string' && (CORNERS as readonly string[]).includes(v)
 }
@@ -64,8 +77,8 @@ export function parsePersistedRecord(raw: unknown): LoadState {
   if (typeof data.sessionId !== 'string' || data.sessionId.trim() === '') {
     return invalid('本地检查点缺少有效的会话编号。')
   }
-  if (typeof data.createdAt !== 'number' || !Number.isFinite(data.createdAt)) {
-    return invalid('本地检查点创建时间损坏，已阻断续作。')
+  if (!isRepresentableTime(data.createdAt)) {
+    return invalid('本地检查点创建时间损坏（超出日期可表示范围），已阻断续作。')
   }
   if (!Array.isArray(data.steps) || data.steps.length !== STEPS.length) {
     return invalid('本地检查点的八步定义缺失或数量不对，已阻断续作。')

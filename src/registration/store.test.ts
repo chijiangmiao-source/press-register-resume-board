@@ -320,6 +320,8 @@ describe('损坏 / 版本不匹配记录', () => {
       validRecord({ values: [{ x: 0, y: 0 }], nextIndex: 1.5 })
     ],
     ['会话编号缺失', validRecord({ sessionId: '' })],
+    ['创建时间超出日期可表示范围（过大有限数）', validRecord({ createdAt: 1e20 })],
+    ['创建时间超出日期可表示范围（过小有限数）', validRecord({ createdAt: -1e20 })],
     ['根节点是数组', []],
     ['根节点是字符串', 'oops']
   ])('%s：报错并阻断', (_name, record) => {
@@ -328,6 +330,23 @@ describe('损坏 / 版本不匹配记录', () => {
     expect(s.getSession()).toBeUndefined()
     expect(s.nextIndex).toBe(-1)
     expect(s.advance('0.00', '0.00').ok).toBe(false)
+  })
+
+  it('有限但超出 Date 范围的创建时间：报错信息明确指向创建时间，且界面不会拿到非数字时间', () => {
+    const s = seed(JSON.stringify(validRecord({ createdAt: 1e20 })))
+    const state = s.getState()
+    expect(state.kind).toBe('error')
+    if (state.kind === 'error') {
+      expect(state.message).toContain('创建时间')
+      expect(state.message).toContain('范围')
+    }
+    expect(s.getSession()).toBeUndefined()
+  })
+
+  it('创建时间恰在 Date 可表示边界内仍可恢复（边界 8.64e15）', () => {
+    const s = seed(JSON.stringify(validRecord({ createdAt: 8.64e15 })))
+    expect(s.getState().kind).toBe('ready')
+    expect(s.getSession()?.createdAt).toBe(8.64e15)
   })
 
   it('阻断状态允许重置，重置后为空仓库并可开始新会话', () => {

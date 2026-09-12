@@ -62,6 +62,35 @@ test.describe('四色套准复测接力板', () => {
     await expect(page.getByTestId('step-no')).toHaveText('第 2 / 8 步')
   })
 
+  test('字段改回合法值后旧行内错误立即消失，无需再次提交', async ({ page }) => {
+    await startSession(page)
+    await page.getByTestId('input-x').fill('3.00')
+    await page.getByTestId('input-y').fill('0.00')
+    await page.getByTestId('submit-step').click()
+    await expect(page.getByTestId('error-x')).toContainText('范围')
+
+    // 只把 X 改成合法值、不点击提交：旧错误应随输入同步消失，仍停在第 1 步
+    await page.getByTestId('input-x').fill('0.10')
+    await expect(page.getByTestId('error-x')).toHaveCount(0)
+    await expect(page.getByTestId('step-no')).toHaveText('第 1 / 8 步')
+
+    // 双轴报错时只修正一轴：另一轴错误保留
+    await page.getByTestId('input-x').fill('9')
+    await page.getByTestId('input-y').fill('abc')
+    await page.getByTestId('submit-step').click()
+    await expect(page.getByTestId('error-x')).toBeVisible()
+    await expect(page.getByTestId('error-y')).toBeVisible()
+    await page.getByTestId('input-x').fill('0.10')
+    await expect(page.getByTestId('error-x')).toHaveCount(0)
+    await expect(page.getByTestId('error-y')).toBeVisible()
+
+    // 再修正 Y 后正常提交推进
+    await page.getByTestId('input-y').fill('0.00')
+    await expect(page.getByTestId('error-y')).toHaveCount(0)
+    await page.getByTestId('submit-step').click()
+    await expect(page.getByTestId('step-no')).toHaveText('第 2 / 8 步')
+  })
+
   test('中途刷新：停在同一检查点并保留旧读数，续作后得到需复调结论', async ({ page }) => {
     await startSession(page)
     // 步骤 1 青左上 合格
@@ -281,5 +310,46 @@ test.describe('四色套准复测接力板', () => {
       return raw ? (JSON.parse(raw) as { values: unknown[] }).values.length : -1
     }, STORAGE_KEY)
     expect(fresh).toBe(0)
+  })
+
+  test('浏览器没有任何旧检查点时：首次开始测量不弹清除确认', async ({ page }) => {
+    let dialogSeen = false
+    page.on('dialog', (d) => {
+      dialogSeen = true
+      d.dismiss()
+    })
+    await expect(page.getByTestId('start-panel')).toBeVisible()
+    await page.getByTestId('start-new').click()
+
+    await expect(page.getByTestId('measure-panel')).toBeVisible()
+    await expect(page.getByTestId('step-no')).toHaveText('第 1 / 8 步')
+    expect(dialogSeen).toBe(false)
+  })
+
+  test('创建时间为有限但超出日期可表示范围的记录：明确报错并阻断续作', async ({ page }) => {
+    await page.evaluate((key) => {
+      const steps = [
+        ['cyan', 'tl'], ['cyan', 'tr'], ['cyan', 'br'], ['cyan', 'bl'],
+        ['magenta', 'tl'], ['magenta', 'tr'], ['magenta', 'br'], ['magenta', 'bl']
+      ].map(([plate, corner], index) => ({ index, plate, corner }))
+      localStorage.setItem(
+        key,
+        JSON.stringify({
+          version: 2,
+          sessionId: 'broken-time',
+          createdAt: 1e20, // 有限数值，但 new Date(1e20) 为 Invalid Date
+          steps,
+          values: [{ x: 0.1, y: 0 }],
+          nextIndex: 1
+        })
+      )
+    }, STORAGE_KEY)
+
+    await page.reload()
+    await expect(page.getByTestId('blocked-panel')).toBeVisible()
+    await expect(page.getByTestId('blocked-message')).toContainText('创建时间')
+    await expect(page.getByTestId('measure-panel')).toHaveCount(0)
+    // 界面不得渲染出 NaN 时间
+    await expect(page.getByTestId('session-created')).toHaveCount(0)
   })
 })
