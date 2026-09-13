@@ -308,14 +308,18 @@ test.describe('四色套准复测接力板', () => {
     const keptAfter = await page.evaluate((key) => localStorage.getItem(key), STORAGE_KEY)
     expect(keptAfter).toBe(keptBefore)
 
-    // 起始页取消确认：不开始新会话，旧检查点原样保留
+    // 起始页取消确认：不开始新会话，恢复原完成结果供继续核对，旧检查点原样保留
     setDialogHandler(page, dismiss)
     await page.getByTestId('start-new').click()
-    await expect(page.getByTestId('start-panel')).toBeVisible()
+    await expect(page.getByTestId('result-panel')).toBeVisible()
+    await expect(page.getByTestId('verdict-title')).toHaveText('可开印')
+    await expect(page.getByTestId('start-panel')).toHaveCount(0)
     const keptAfterDismiss = await page.evaluate((key) => localStorage.getItem(key), STORAGE_KEY)
     expect(keptAfterDismiss).toBe(keptBefore)
 
-    // 接受确认：清除旧检查点，回到第 1 步的新会话
+    // 再次进入起始页并接受确认：清除旧检查点，回到第 1 步的新会话
+    await page.getByTestId('restart-after-finish').click()
+    await expect(page.getByTestId('start-panel')).toBeVisible()
     setDialogHandler(page, accept)
     await page.getByTestId('start-new').click()
     await expect(page.getByTestId('step-no')).toHaveText('第 1 / 8 步')
@@ -325,6 +329,75 @@ test.describe('四色套准复测接力板', () => {
       return raw ? (JSON.parse(raw) as { values: unknown[] }).values.length : -1
     }, STORAGE_KEY)
     expect(fresh).toBe(0)
+  })
+
+  test('进行中的会话可从重开入口发起新会话：确认清除旧检查点并重新选单位', async ({ page }) => {
+    await startSession(page)
+    await submitStep(page, '0.10', '0.00')
+    await submitStep(page, '0.20', '0.00')
+    await expect(page.getByTestId('step-no')).toHaveText('第 3 / 8 步')
+
+    // 进行中的会话提供重开入口：返回起始页，可重新选择录入单位
+    const dismiss = (d: import('@playwright/test').Dialog) => d.dismiss()
+    const accept = (d: import('@playwright/test').Dialog) => d.accept()
+    setDialogHandler(page, dismiss)
+    await page.getByTestId('restart-during-session').click()
+    await expect(page.getByTestId('start-panel')).toBeVisible()
+    await expect(page.getByTestId('unit-select')).toBeVisible()
+
+    // 取消清除确认：回到原会话录入页，进度与旧读数原样保留
+    await page.getByTestId('unit-um').check()
+    await page.getByTestId('start-new').click()
+    await expect(page.getByTestId('measure-panel')).toBeVisible()
+    await expect(page.getByTestId('step-no')).toHaveText('第 3 / 8 步')
+    await expect(page.getByTestId('checkpoint-info')).toContainText('已完成 2 / 8 步')
+    await expect(page.getByTestId('history-row-0')).toContainText('+0.10')
+    await expect(page.getByTestId('session-unit')).toContainText('毫米')
+
+    // 接受清除确认：旧检查点清除，新会话按重新选择的微米单位从第 1 步开始
+    await page.getByTestId('restart-during-session').click()
+    await expect(page.getByTestId('start-panel')).toBeVisible()
+    await page.getByTestId('unit-um').check()
+    setDialogHandler(page, accept)
+    await page.getByTestId('start-new').click()
+    await expect(page.getByTestId('measure-panel')).toBeVisible()
+    await expect(page.getByTestId('step-no')).toHaveText('第 1 / 8 步')
+    await expect(page.getByTestId('checkpoint-info')).toContainText('已完成 0 / 8 步')
+    await expect(page.getByTestId('session-unit')).toContainText('微米')
+    const fresh = await page.evaluate((key) => {
+      const raw = localStorage.getItem(key)
+      return raw ? (JSON.parse(raw) as { values: unknown[]; nextIndex: number; unit: string }) : null
+    }, STORAGE_KEY)
+    expect(fresh?.values).toEqual([])
+    expect(fresh?.nextIndex).toBe(0)
+    expect(fresh?.unit).toBe('um')
+  })
+
+  test('本地读数精度不足 0.01mm 的检查点：判为损坏并明确阻断续作', async ({ page }) => {
+    await page.evaluate((key) => {
+      const steps = [
+        ['cyan', 'tl'], ['cyan', 'tr'], ['cyan', 'br'], ['cyan', 'bl'],
+        ['magenta', 'tl'], ['magenta', 'tr'], ['magenta', 'br'], ['magenta', 'bl']
+      ].map(([plate, corner], index) => ({ index, plate, corner }))
+      localStorage.setItem(
+        key,
+        JSON.stringify({
+          version: 2,
+          sessionId: 'precision-broken',
+          createdAt: Date.now(),
+          unit: 'mm',
+          steps,
+          // 0.1200000001 不是 0.01 mm 的整数倍（超出浮点噪声级），记录已损坏
+          values: [{ x: 0.1200000001, y: 0 }],
+          nextIndex: 1
+        })
+      )
+    }, STORAGE_KEY)
+    await page.reload()
+
+    await expect(page.getByTestId('blocked-panel')).toBeVisible()
+    await expect(page.getByTestId('blocked-message')).toContainText('精度')
+    await expect(page.getByTestId('measure-panel')).toHaveCount(0)
   })
 
   test('浏览器没有任何旧检查点时：首次开始测量不弹清除确认', async ({ page }) => {

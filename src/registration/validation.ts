@@ -47,10 +47,16 @@ export function parseOffset(raw: string, axis: 'X' | 'Y'): OffsetParseResult {
   return { ok: true, value: Object.is(normalized, -0) ? 0 : normalized }
 }
 
-/** 判断持久化恢复出来的数值是否仍是合法测量值（同样不猜测、不放行脏值）。 */
+/**
+ * 判断持久化恢复出来的数值是否仍是合法测量值（同样不猜测、不放行脏值）。
+ * 容差必须贴着浮点噪声：本应用落盘的读数就是“百分之一毫米”整数乘步进，
+ * 恢复时偏差恒为 0；手工/旧工具写入的干净小数（如 0.29）偏差也不超过
+ * 2.3e-16。容差若放宽（如 1e-9），会把 0.1200000001 这类非 0.01 mm 精度的
+ * 脏读数误判为合法而继续会话，因此收紧到 1e-12。
+ */
 export function isValidStoredOffset(value: unknown): value is number {
   if (typeof value !== 'number' || !Number.isFinite(value)) return false
   if (value < OFFSET_MIN || value > OFFSET_MAX) return false
   const hundredths = Math.round(value / OFFSET_STEP)
-  return Math.abs(hundredths * OFFSET_STEP - value) < 1e-9
+  return Math.abs(hundredths * OFFSET_STEP - value) < 1e-12
 }

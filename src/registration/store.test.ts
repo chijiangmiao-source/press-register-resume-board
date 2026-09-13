@@ -326,6 +326,14 @@ describe('损坏 / 版本不匹配记录', () => {
       validRecord({ values: [{ x: 0.001, y: 0 }], nextIndex: 1 })
     ],
     [
+      '读数非百分之一毫米精度（浮点噪声级以外的微小偏差）',
+      validRecord({ values: [{ x: 0.1200000001, y: 0 }], nextIndex: 1 })
+    ],
+    [
+      '读数为非 0.01 整数倍的微小量',
+      validRecord({ values: [{ x: 0, y: 1e-10 }], nextIndex: 1 })
+    ],
+    [
       '已提交值多于八步',
       validRecord({
         values: Array.from({ length: 9 }, () => ({ x: 0, y: 0 })),
@@ -386,6 +394,22 @@ describe('损坏 / 版本不匹配记录', () => {
     const s = seed(JSON.stringify(validRecord({ createdAt: 8.64e15 })))
     expect(s.getState().kind).toBe('ready')
     expect(s.getSession()?.createdAt).toBe(8.64e15)
+  })
+
+  it('合法读数的浮点表示（如 0.1+0.2、干净小数 0.29）恢复时不误判为损坏', () => {
+    const s = seed(
+      JSON.stringify(
+        validRecord({
+          values: [
+            { x: 0.1 + 0.2, y: 0.29 },
+            { x: -1.91, y: 2 }
+          ],
+          nextIndex: 2
+        })
+      )
+    )
+    expect(s.getState().kind).toBe('ready')
+    expect(s.nextIndex).toBe(2)
   })
 
   it('阻断状态允许重置，重置后为空仓库并可开始新会话', () => {

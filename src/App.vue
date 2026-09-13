@@ -130,6 +130,22 @@ const progressItems = computed(() =>
             @submit="submitCurrent"
           />
           <HistoryTable :values="session.values" :unit="unit" />
+
+          <!-- 进行中的会话也提供重开入口：回起始页重新选单位，确认后清除旧检查点 -->
+          <section class="panel restart-entry">
+            <p class="hint">
+              需要更换录入单位或放弃当前进度？可返回起始页重新选择，
+              确认后清除本机检查点并开始新会话。
+            </p>
+            <button
+              type="button"
+              class="btn btn-secondary"
+              data-testid="restart-during-session"
+              @click="openStartPanel"
+            >
+              开始新会话
+            </button>
+          </section>
         </template>
       </template>
     </template>

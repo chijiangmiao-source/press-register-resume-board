@@ -129,6 +129,46 @@ describe('开始新会话的确认时机', () => {
     expect(kv.getItem(STORAGE_KEY)).toBe(beforeText)
   })
 
+  it('进行中会话进入起始页后取消确认：回到录入页，进度与草稿不受影响', () => {
+    store.begin(true)
+    store.advance('0.10', '0.00')
+    store.advance('0.20', '0.00')
+    const beforeText = kv.getItem(STORAGE_KEY)
+    vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const u = useSession(store)
+
+    u.openStartPanel()
+    expect(u.showStartPanel.value).toBe(true)
+    u.startNewSession('um')
+
+    // 取消清除确认：回到原会话视图，不停留在起始页
+    expect(u.showStartPanel.value).toBe(false)
+    expect(u.session.value?.unit).toBe('mm')
+    expect(u.nextIndex.value).toBe(2)
+    expect(kv.getItem(STORAGE_KEY)).toBe(beforeText)
+  })
+
+  it('完成八步后进入起始页再取消确认：恢复原完成结果供继续核对', () => {
+    store.begin(true, 'um')
+    for (let i = 0; i < 8; i++) store.advance('100', '-50')
+    const beforeText = kv.getItem(STORAGE_KEY)
+    vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const u = useSession(store)
+    const verdictBefore = u.verdict.value
+
+    u.openStartPanel()
+    expect(u.showStartPanel.value).toBe(true)
+    u.startNewSession('mm')
+
+    // 取消清除确认：恢复完成结果（结论与诊断仍在），检查点原样保留
+    expect(u.showStartPanel.value).toBe(false)
+    expect(u.isComplete.value).toBe(true)
+    expect(u.verdict.value).toEqual(verdictBefore)
+    expect(u.diagnosis.value).toBeDefined()
+    expect(u.session.value?.unit).toBe('um')
+    expect(kv.getItem(STORAGE_KEY)).toBe(beforeText)
+  })
+
   it('确有旧会话时接受确认：清除旧读数并从第 1 步重新开始', () => {
     store.begin(true)
     store.advance('0.10', '0.00')

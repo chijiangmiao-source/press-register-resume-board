@@ -54,4 +54,17 @@ describe('parseOffset 偏移录入校验', () => {
     expect(isValidStoredOffset(NaN)).toBe(false)
     expect(isValidStoredOffset(null)).toBe(false)
   })
+
+  it('isValidStoredOffset 只放行 0.01 mm 整数倍，非百分之一毫米精度一律拒绝', () => {
+    // 非 0.01 mm 整数倍的读数（含浮点噪声级以外的微小偏差）必须判为脏值
+    expect(isValidStoredOffset(0.1200000001)).toBe(false)
+    expect(isValidStoredOffset(1e-10)).toBe(false)
+    expect(isValidStoredOffset(-0.000000001)).toBe(false)
+    expect(isValidStoredOffset(1.995)).toBe(false)
+    // 合法读数的浮点表示仍可恢复：本应用落盘值（0.1+0.2 之类）与干净小数
+    expect(isValidStoredOffset(0.1 + 0.2)).toBe(true)
+    expect(isValidStoredOffset(0.29)).toBe(true)
+    expect(isValidStoredOffset(-1.91)).toBe(true)
+    expect(isValidStoredOffset(2)).toBe(true)
+  })
 })

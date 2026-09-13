@@ -58,13 +58,19 @@ export function useSession(store: RegistrationStore) {
    * 新会话：仅当确有旧检查点（可续作会话）时才弹确认，防止误覆盖旧读数；
    * 空仓库（无任何旧记录）直接开始，不打扰调机员。
    * 所选录入单位随会话创建锁定，进行中的会话不可更改。
+   * 取消清除确认时回到之前的会话视图（进行中的录入页或八步完成后的结论页），
+   * 不把调机员留在起始页。
    */
   function startNewSession(unitChoice: UnitId = 'mm'): void {
     if (loadState.value.kind === 'ready') {
       const confirmed = window.confirm(
         '开始新会话将清除当前本地检查点，未完成的旧读数将无法续作。确定继续吗？'
       )
-      if (!confirmed) return
+      if (!confirmed) {
+        // 旧检查点原样保留，恢复原会话视图（完成结果供继续核对 / 录入页继续测量）。
+        showStartPanel.value = false
+        return
+      }
     }
     session.value = store.begin(true, unitChoice)
     draftX.value = ''
