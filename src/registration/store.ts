@@ -136,6 +136,39 @@ export class RegistrationStore {
     return { ok: true, session: cloneSession(next) }
   }
 
+  /**
+   * 撤回最近一次提交（仅尚未完成的录入阶段可撤回）。
+   * 删除末条读数、回退独立落盘的下一步索引，并用一次原子 setItem
+   * 替换整个检查点；会话编号与锁定单位原样保留。
+   * 写入失败时内存状态与旧检查点都不动，返回原因由界面提示，可重试。
+   */
+  undoLast(): { ok: true; session: SessionData } | { ok: false; reason: string } {
+    if (this.state.kind !== 'ready') {
+      return { ok: false, reason: '本地检查点不可用，无法撤回，请先重置后开始新会话。' }
+    }
+    const session = this.state.session
+    if (session.nextIndex <= 0) {
+      return { ok: false, reason: '尚未提交任何读数，没有可撤回的步骤。' }
+    }
+    if (session.nextIndex >= STEPS.length) {
+      return { ok: false, reason: '八步测量已全部完成，结论已生成，不可再撤回。' }
+    }
+
+    const next: SessionData = {
+      ...cloneSession(session),
+      values: session.values.slice(0, -1),
+      nextIndex: session.nextIndex - 1
+    }
+    try {
+      this.persist(next)
+    } catch {
+      // 落盘失败（如存储被禁用/限额）：保留原进度，内存状态不变。
+      return { ok: false, reason: '撤回未能写入本地检查点，已保留原进度，请重试。' }
+    }
+    this.state = { kind: 'ready', session: next }
+    return { ok: true, session: cloneSession(next) }
+  }
+
   /** 清除损坏/过期检查点，回到空仓库状态。 */
   reset(): void {
     this.kv.removeItem(STORAGE_KEY)

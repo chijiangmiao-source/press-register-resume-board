@@ -7,10 +7,13 @@ import type { SessionData } from '../registration/types'
 
 class FakeKv implements KvStore {
   data = new Map<string, string>()
+  /** 置为 true 时 setItem 抛错，模拟检查点写入失败。 */
+  throwOnWrite = false
   getItem(key: string) {
     return this.data.has(key) ? (this.data.get(key) as string) : null
   }
   setItem(key: string, value: string) {
+    if (this.throwOnWrite) throw new Error('模拟本地写入失败')
     this.data.set(key, value)
   }
   removeItem(key: string) {
@@ -257,6 +260,102 @@ describe('会话单位选择与锁定', () => {
     expect(u.showStartPanel.value).toBe(false)
     expect(u.unit.value).toBe('mm')
     expect(u.nextIndex.value).toBe(0)
+  })
+})
+
+describe('撤回最近一次提交（界面桥接）', () => {
+  it('确认框说明将回到的色版角点；取消确认则保留原进度，不产生任何写入', () => {
+    store.begin(true)
+    store.advance('0.10', '0.00')
+    store.advance('0.20', '0.00')
+    const beforeText = kv.getItem(STORAGE_KEY)
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const u = useSession(store)
+
+    u.undoLast()
+
+    expect(confirmSpy).toHaveBeenCalledTimes(1)
+    const message = confirmSpy.mock.calls[0][0]
+    // 操作前说明将回到哪个色版和角点（第 2 步 = 青版 · 右上）
+    expect(message).toContain('青版')
+    expect(message).toContain('右上')
+    expect(u.nextIndex.value).toBe(2)
+    expect(u.session.value?.values).toHaveLength(2)
+    expect(u.undoError.value).toBe('')
+    expect(kv.getItem(STORAGE_KEY)).toBe(beforeText)
+  })
+
+  it('确认撤回：回到被撤回的步骤，草稿与行内错误清空，会话编号与单位不变', () => {
+    store.begin(true)
+    store.advance('0.10', '0.00')
+    store.advance('0.20', '0.00')
+    const sessionId = store.getSession()?.sessionId
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const u = useSession(store)
+    // 当前步骤已有草稿与行内错误：撤回后一并清空，避免误投到被撤回的角点
+    u.draftX.value = '9'
+    u.draftY.value = '0.00'
+    u.submitCurrent()
+    expect(u.fieldError.x).toBeTruthy()
+
+    u.undoLast()
+
+    expect(u.nextIndex.value).toBe(1)
+    expect(u.session.value?.values).toEqual([{ x: 0.1, y: 0 }])
+    expect(u.session.value?.sessionId).toBe(sessionId)
+    expect(u.unit.value).toBe('mm')
+    expect(u.draftX.value).toBe('')
+    expect(u.draftY.value).toBe('')
+    expect(u.fieldError.x).toBeUndefined()
+    expect(u.fieldError.y).toBeUndefined()
+    expect(u.undoError.value).toBe('')
+    const persisted = JSON.parse(kv.getItem(STORAGE_KEY) as string) as SessionData
+    expect(persisted.values).toEqual([{ x: 0.1, y: 0 }])
+    expect(persisted.nextIndex).toBe(1)
+  })
+
+  it('检查点写入失败：界面保留原进度并给出明确反馈，恢复后可重试', () => {
+    store.begin(true)
+    store.advance('0.10', '0.00')
+    store.advance('0.20', '0.00')
+    const beforeText = kv.getItem(STORAGE_KEY)
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const u = useSession(store)
+
+    kv.throwOnWrite = true
+    u.undoLast()
+
+    expect(u.undoError.value).toBeTruthy()
+    expect(u.nextIndex.value).toBe(2)
+    expect(u.session.value?.values).toHaveLength(2)
+    expect(kv.getItem(STORAGE_KEY)).toBe(beforeText)
+
+    kv.throwOnWrite = false
+    u.undoLast()
+    expect(u.undoError.value).toBe('')
+    expect(u.nextIndex.value).toBe(1)
+  })
+
+  it('首步前与完成后调用均为无操作：不弹确认、不写盘', () => {
+    store.begin(true)
+    const confirmSpy = vi.spyOn(window, 'confirm')
+    const u = useSession(store)
+
+    // 尚未提交任何读数
+    u.undoLast()
+    expect(confirmSpy).not.toHaveBeenCalled()
+    expect(u.nextIndex.value).toBe(0)
+
+    // 八步全部完成
+    for (let i = 0; i < 8; i++) {
+      u.draftX.value = '0.00'
+      u.draftY.value = '0.00'
+      u.submitCurrent()
+    }
+    expect(u.isComplete.value).toBe(true)
+    u.undoLast()
+    expect(confirmSpy).not.toHaveBeenCalled()
+    expect(u.nextIndex.value).toBe(8)
   })
 })
 

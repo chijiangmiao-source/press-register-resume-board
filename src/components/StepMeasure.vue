@@ -11,16 +11,21 @@ const props = defineProps<{
   draftY: string
   fieldError: { x?: string; y?: string }
   unit: UnitId
+  undoError?: string
 }>()
 
 const emit = defineEmits<{
   'update:draftX': [value: string]
   'update:draftY': [value: string]
   submit: []
+  undo: []
 }>()
 
 const step = computed(() => STEPS[props.nextIndex])
 const canSubmit = computed(() => props.draftX.trim() !== '' && props.draftY.trim() !== '')
+/** 仅已有提交且仍处于录入阶段时可撤回最近一次提交。 */
+const canUndo = computed(() => props.nextIndex > 0 && props.nextIndex < STEPS.length)
+const lastStep = computed(() => STEPS[props.nextIndex - 1])
 const symbol = computed(() => UNIT_SYMBOL[props.unit])
 const rangeText = computed(() => unitRangeText(props.unit))
 const toleranceText = computed(() => formatUnitMagnitude(TOLERANCE, props.unit))
@@ -79,7 +84,26 @@ const placeholderY = computed(() => (props.unit === 'um' ? '如 -100' : '如 -0.
       </button>
     </form>
     <p class="hint tolerance-hint" data-testid="tolerance-hint">
-      放行阈值：|X|、|Y| 均 ≤ {{ toleranceText }} {{ symbol }}。已提交步骤不可回改。
+      放行阈值：|X|、|Y| 均 ≤ {{ toleranceText }} {{ symbol }}。
+      完成前可撤回最近一次提交，其余已提交步骤不可回改。
     </p>
+
+    <!-- 撤回入口：仅已有提交且仍在录入阶段时出现；确认后回到被撤回的色版角点 -->
+    <div v-if="canUndo" class="undo-row">
+      <button
+        type="button"
+        class="btn btn-secondary"
+        data-testid="undo-last"
+        @click="emit('undo')"
+      >
+        撤回上一步（{{ plateLabel(lastStep.plate) }} · {{ cornerLabel(lastStep.corner) }}）
+      </button>
+      <p class="hint undo-hint">
+        刚提交的读数抄录有误？可撤回后回到该角点重新录入，会话编号与录入单位不变。
+      </p>
+      <p v-if="undoError" class="field-error undo-error" data-testid="undo-error" role="alert">
+        {{ undoError }}
+      </p>
+    </div>
   </section>
 </template>

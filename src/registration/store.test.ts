@@ -7,10 +7,13 @@ class FakeKv implements KvStore {
   data = new Map<string, string>()
   writes = 0
   removes = 0
+  /** 置为 true 时 setItem 抛错，模拟本地写入失败（如存储被禁用/限额）。 */
+  throwOnWrite = false
   getItem(key: string) {
     return this.data.has(key) ? (this.data.get(key) as string) : null
   }
   setItem(key: string, value: string) {
+    if (this.throwOnWrite) throw new Error('模拟本地写入失败')
     this.writes++
     this.data.set(key, value)
   }
@@ -194,6 +197,162 @@ describe('拒绝非法推进（不可回改 / 不可猜测）', () => {
     expect(r.ok).toBe(false)
     expect(kv.writes).toBe(writesBefore)
     expect(store.nextIndex).toBe(8)
+  })
+})
+
+describe('撤回最近一次提交（undoLast）', () => {
+  beforeEach(() => {
+    store.begin(true)
+  })
+
+  it('删除末条读数、回退下一步索引，并以一次原子写入替换检查点', () => {
+    store.advance('0.10', '0.00')
+    store.advance('0.20', '0.00')
+    store.advance('0.30', '-0.10')
+    const sessionId = store.getSession()?.sessionId
+    const writesBefore = kv.writes
+
+    const r = store.undoLast()
+    expect(r.ok).toBe(true)
+    expect(store.nextIndex).toBe(2)
+    // 整个撤回只产生一次 setItem：刷新后只会看到撤回前或撤回后的完整检查点
+    expect(kv.writes).toBe(writesBefore + 1)
+
+    const persisted = kv.raw() as SessionData
+    expect(persisted.values).toEqual([
+      { x: 0.1, y: 0 },
+      { x: 0.2, y: 0 }
+    ])
+    expect(persisted.nextIndex).toBe(2)
+    // 会话编号与锁定单位原样保留
+    expect(persisted.sessionId).toBe(sessionId)
+    expect(persisted.unit).toBe('mm')
+    expect(store.getSession()?.sessionId).toBe(sessionId)
+  })
+
+  it('撤回返回的是拷贝，外部篡改不影响内部状态', () => {
+    store.advance('0.10', '0.00')
+    store.advance('0.20', '0.00')
+    const r = store.undoLast()
+    expect(r.ok).toBe(true)
+    if (r.ok) {
+      r.session.values[0].x = 9.99
+      r.session.nextIndex = 7
+    }
+    expect(store.getSession()?.values[0].x).toBe(0.1)
+    expect(store.nextIndex).toBe(1)
+  })
+
+  it('撤回后可按原顺序重新录入，放行结论与色版诊断只基于新的八步数据', () => {
+    store.advance('0.20', '0.00')
+    store.advance('0.20', '0.00')
+    // 误录：若该值残留，青版将角点不一致且结论不同
+    store.advance('0.01', '0.00')
+    expect(store.undoLast().ok).toBe(true)
+    // 按原顺序重新录入第三步，随后完成八步
+    store.advance('0.20', '0.00')
+    for (let i = 0; i < 5; i++) store.advance('0.20', '0.00')
+
+    expect(store.isComplete).toBe(true)
+    const persisted = kv.raw() as SessionData
+    expect(persisted.values).toHaveLength(8)
+    expect(persisted.values.every((m) => m.x === 0.2 && m.y === 0)).toBe(true)
+
+    const verdict = store.getVerdict()
+    expect(verdict?.pass).toBe(false)
+    expect(verdict?.deviations.map((d) => d.step.index)).toEqual([0, 1, 2, 3, 4, 5, 6, 7])
+
+    const diag = store.getDiagnosis()
+    expect(diag?.plates[0].uniform).toBe(true)
+    expect(diag?.plates[0].advice).toEqual({ x: -0.2, y: 0 })
+    expect(diag?.plates[1].uniform).toBe(true)
+    expect(diag?.plates[1].advice).toEqual({ x: -0.2, y: 0 })
+  })
+
+  it('重新提交仍经过既有范围与精度校验', () => {
+    store.advance('0.10', '0.00')
+    expect(store.undoLast().ok).toBe(true)
+    // 越界与精度不足的输入在撤回后的步骤上同样被原地拒绝
+    expect(store.advance('2.50', '0.00').ok).toBe(false)
+    expect(store.advance('0.001', '0.00').ok).toBe(false)
+    expect(store.nextIndex).toBe(0)
+    expect(store.advance('0.05', '0.00').ok).toBe(true)
+    expect(store.nextIndex).toBe(1)
+  })
+
+  it('尚未提交任何读数时不可撤回，不产生写入', () => {
+    const writesBefore = kv.writes
+    const r = store.undoLast()
+    expect(r.ok).toBe(false)
+    expect(kv.writes).toBe(writesBefore)
+    expect(store.nextIndex).toBe(0)
+    expect((kv.raw() as SessionData).values).toEqual([])
+  })
+
+  it('八步全部完成后不可撤回（结论已锁定），不产生写入', () => {
+    for (let i = 0; i < 8; i++) store.advance('0.00', '0.00')
+    const writesBefore = kv.writes
+    const r = store.undoLast()
+    expect(r.ok).toBe(false)
+    expect(kv.writes).toBe(writesBefore)
+    expect(store.nextIndex).toBe(8)
+    expect(store.isComplete).toBe(true)
+    expect((kv.raw() as SessionData).values).toHaveLength(8)
+  })
+
+  it('空仓库或损坏记录下不可撤回', () => {
+    const emptyKv = new FakeKv()
+    const empty = new RegistrationStore(emptyKv)
+    expect(empty.undoLast().ok).toBe(false)
+
+    emptyKv.data.set(STORAGE_KEY, '{not-json')
+    const broken = new RegistrationStore(emptyKv)
+    expect(broken.undoLast().ok).toBe(false)
+    expect(broken.nextIndex).toBe(-1)
+  })
+
+  it('检查点写入失败：返回明确原因，内存状态与落盘记录都保持原进度', () => {
+    store.advance('0.10', '0.00')
+    store.advance('0.20', '0.00')
+    const textBefore = kv.getItem(STORAGE_KEY)
+    const writesBefore = kv.writes
+
+    kv.throwOnWrite = true
+    const r = store.undoLast()
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.reason).toContain('检查点')
+    // 内存状态不变：仍是两步、停在第 3 步
+    expect(store.nextIndex).toBe(2)
+    expect(store.getSession()?.values).toEqual([
+      { x: 0.1, y: 0 },
+      { x: 0.2, y: 0 }
+    ])
+    // 落盘记录不变，也没有半途中断的写入
+    expect(kv.getItem(STORAGE_KEY)).toBe(textBefore)
+    expect(kv.writes).toBe(writesBefore)
+
+    // 恢复写入能力后可正常撤回
+    kv.throwOnWrite = false
+    expect(store.undoLast().ok).toBe(true)
+    expect(store.nextIndex).toBe(1)
+  })
+
+  it('微米会话撤回：单位与既有读数原样保留，重新提交仍按微米校验', () => {
+    store.begin(true, 'um')
+    store.advance('120', '-50')
+    store.advance('200', '0')
+
+    expect(store.undoLast().ok).toBe(true)
+    const persisted = kv.raw() as SessionData
+    expect(persisted.unit).toBe('um')
+    expect(persisted.values).toEqual([{ x: 0.12, y: -0.05 }])
+    expect(persisted.nextIndex).toBe(1)
+
+    // 非法微米输入仍被原地拒绝；合法值重新提交并换算落盘
+    expect(store.advance('15', '0').ok).toBe(false)
+    expect(store.nextIndex).toBe(1)
+    expect(store.advance('-30', '40').ok).toBe(true)
+    expect(store.getSession()?.values[1]).toEqual({ x: -0.03, y: 0.04 })
   })
 })
 

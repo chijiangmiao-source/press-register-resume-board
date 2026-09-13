@@ -1,7 +1,8 @@
 import { computed, reactive, ref, watch } from 'vue'
 import { RegistrationStore } from '../registration/store'
 import { STEPS, TOLERANCE } from '../registration/steps'
-import { parseUnitOffset } from '../registration/units'
+import { parseUnitOffset, formatUnitOffset, UNIT_SYMBOL } from '../registration/units'
+import { cornerLabel, plateLabel } from '../registration/format'
 import type { LoadState, SessionData, UnitId, Verdict } from '../registration/types'
 import type { RegistrationDiagnosis } from '../registration/diagnosis'
 
@@ -33,6 +34,8 @@ export function useSession(store: RegistrationStore) {
   const unit = computed<UnitId>(() => session.value?.unit ?? 'mm')
   const verdict = ref<Verdict | undefined>(store.getVerdict())
   const diagnosis = ref<RegistrationDiagnosis | undefined>(store.getDiagnosis())
+  /** 撤回失败（如检查点写入失败）时的行内反馈；成功或无操作时为空。 */
+  const undoError = ref('')
 
   // 字段恢复合法时，上一次提交留下的行内错误必须同步消失，不残留旧提示。
   // 校验口径跟随会话锁定的单位（毫米 0.01 步进 / 微米 10 步进）。
@@ -110,6 +113,37 @@ export function useSession(store: RegistrationStore) {
     syncFromStore()
   }
 
+  /**
+   * 撤回最近一次提交：先确认将回到哪个色版角点，再由 store 删除末条读数、
+   * 回退下一步索引并原子替换检查点。取消确认或写入失败都保留原进度，
+   * 写入失败时在录入区给出明确反馈；成功后清空草稿与行内错误，
+   * 输入区回到被撤回的那一步，会话编号与锁定单位不变。
+   */
+  function undoLast(): void {
+    const current = session.value
+    if (!current || current.nextIndex <= 0 || current.nextIndex >= STEPS.length) return
+    const step = STEPS[current.nextIndex - 1]
+    const last = current.values[current.nextIndex - 1]
+    const symbol = UNIT_SYMBOL[unit.value]
+    const confirmed = window.confirm(
+      `将撤回最近一次提交：第 ${current.nextIndex} 步 · ${plateLabel(step.plate)} · ${cornerLabel(step.corner)}` +
+        `（X = ${formatUnitOffset(last.x, unit.value)} ${symbol}，Y = ${formatUnitOffset(last.y, unit.value)} ${symbol}）。` +
+        '撤回后回到该色版角点重新录入，会话编号与录入单位保持不变。确定撤回吗？'
+    )
+    if (!confirmed) return
+    const result = store.undoLast()
+    if (!result.ok) {
+      undoError.value = result.reason
+      return
+    }
+    undoError.value = ''
+    fieldError.x = undefined
+    fieldError.y = undefined
+    draftX.value = ''
+    draftY.value = ''
+    syncFromStore()
+  }
+
   return {
     store,
     loadState,
@@ -123,10 +157,12 @@ export function useSession(store: RegistrationStore) {
     showStartPanel,
     verdict,
     diagnosis,
+    undoError,
     tolerance: TOLERANCE,
     startNewSession,
     openStartPanel,
     resetCheckpoint,
-    submitCurrent
+    submitCurrent,
+    undoLast
   }
 }

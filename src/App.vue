@@ -25,10 +25,12 @@ const {
   showStartPanel,
   verdict,
   diagnosis,
+  undoError,
   startNewSession,
   openStartPanel,
   resetCheckpoint,
-  submitCurrent
+  submitCurrent,
+  undoLast
 } = useSession(store)
 
 const isBlocked = computed(() => loadState.value.kind === 'error')
@@ -125,9 +127,11 @@ const progressItems = computed(() =>
             :draft-y="draftY"
             :field-error="fieldError"
             :unit="unit"
+            :undo-error="undoError"
             @update:draft-x="draftX = $event"
             @update:draft-y="draftY = $event"
             @submit="submitCurrent"
+            @undo="undoLast"
           />
           <HistoryTable :values="session.values" :unit="unit" />
 

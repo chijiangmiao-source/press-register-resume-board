@@ -218,6 +218,24 @@ body {
   margin-top: 12px;
 }
 
+.undo-row {
+  margin-top: 14px;
+  border-top: 1px dashed var(--line);
+  padding-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.undo-row .hint {
+  margin: 0;
+}
+
+.undo-error {
+  margin: 0;
+}
+
 .offset-form {
   display: grid;
   grid-template-columns: 1fr 1fr auto;

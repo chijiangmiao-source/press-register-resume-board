@@ -22,7 +22,7 @@ const symbol = computed(() => UNIT_SYMBOL[props.unit])
 
 <template>
   <section class="panel history" data-testid="history-panel">
-    <h3>已提交读数（不可回改）</h3>
+    <h3>已提交读数（仅最近一次可撤回）</h3>
     <table>
       <thead>
         <tr>
