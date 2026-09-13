@@ -42,7 +42,9 @@ export function parseOffset(raw: string, axis: 'X' | 'Y'): OffsetParseResult {
   if (Math.abs(hundredths * OFFSET_STEP - value) > 1e-9) {
     return { ok: false, reason: `${axis} 必须是 0.01 mm 的整数倍` }
   }
-  return { ok: true, value: hundredths * OFFSET_STEP }
+  // 归一化负零（如输入 “-0.00”），落盘与展示一律使用 +0。
+  const normalized = hundredths * OFFSET_STEP
+  return { ok: true, value: Object.is(normalized, -0) ? 0 : normalized }
 }
 
 /** 判断持久化恢复出来的数值是否仍是合法测量值（同样不猜测、不放行脏值）。 */

@@ -64,6 +64,30 @@ body {
   font-size: 14px;
 }
 
+.unit-select {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin: 0 0 16px;
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+
+.unit-select legend {
+  font-size: 13px;
+  color: var(--muted);
+  padding: 0 6px;
+}
+
+.unit-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
 .btn {
   font-size: 15px;
   border-radius: 8px;

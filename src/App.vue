@@ -4,6 +4,7 @@ import { RegistrationStore } from './registration/store'
 import { useSession } from './composables/useSession'
 import { STEPS } from './registration/steps'
 import { cornerLabel, formatDateTime, plateLabel, shortSessionId } from './registration/format'
+import { UNIT_LABEL, UNIT_SYMBOL } from './registration/units'
 import StartPanel from './components/StartPanel.vue'
 import StepMeasure from './components/StepMeasure.vue'
 import HistoryTable from './components/HistoryTable.vue'
@@ -20,9 +21,12 @@ const {
   fieldError,
   nextIndex,
   isComplete,
+  unit,
+  showStartPanel,
   verdict,
   diagnosis,
   startNewSession,
+  openStartPanel,
   resetCheckpoint,
   submitCurrent
 } = useSession(store)
@@ -58,7 +62,7 @@ const progressItems = computed(() =>
 
     <template v-else>
       <StartPanel
-        v-if="!session"
+        v-if="!session || showStartPanel"
         :has-checkpoint="loadState.kind !== 'empty'"
         @start="startNewSession"
       />
@@ -75,6 +79,12 @@ const progressItems = computed(() =>
           <div class="meta-row">
             <span class="meta-label">创建时间</span>
             <span data-testid="session-created">{{ formatDateTime(session.createdAt) }}</span>
+          </div>
+          <div class="meta-row">
+            <span class="meta-label">录入单位</span>
+            <span data-testid="session-unit">
+              {{ UNIT_LABEL[unit] }}（{{ UNIT_SYMBOL[unit] }}），会话期间锁定
+            </span>
           </div>
           <div class="meta-row">
             <span class="meta-label">检查点</span>
@@ -104,7 +114,8 @@ const progressItems = computed(() =>
           v-if="isComplete && verdict"
           :verdict="verdict"
           :diagnosis="diagnosis"
-          @restart="startNewSession"
+          :unit="unit"
+          @restart="openStartPanel"
         />
 
         <template v-else>
@@ -113,11 +124,12 @@ const progressItems = computed(() =>
             :draft-x="draftX"
             :draft-y="draftY"
             :field-error="fieldError"
+            :unit="unit"
             @update:draft-x="draftX = $event"
             @update:draft-y="draftY = $event"
             @submit="submitCurrent"
           />
-          <HistoryTable :values="session.values" />
+          <HistoryTable :values="session.values" :unit="unit" />
         </template>
       </template>
     </template>

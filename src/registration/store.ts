@@ -1,11 +1,12 @@
 import { STORAGE_KEY, STORAGE_VERSION, STEPS, TOLERANCE } from './steps'
 import { restoreFromText } from './persistence'
-import { parseOffset } from './validation'
+import { parseUnitOffset } from './units'
 import { buildDiagnosis } from './diagnosis'
 import type {
   LoadState,
   Measurement,
   SessionData,
+  UnitId,
   Verdict,
   Deviation
 } from './types'
@@ -66,8 +67,13 @@ export class RegistrationStore {
   /**
    * 开始新会话。必须显式传入 requireConfirm=true，
    * 由界面层完成“确认清除旧检查点”后调用，杜绝误刷新/误操作覆盖旧读数。
+   * 录入单位随会话创建锁定并原子落盘，进行中的会话不可中途更改。
    */
-  begin(requireConfirm: true, now: () => number = () => Date.now()): SessionData {
+  begin(
+    requireConfirm: true,
+    unit: UnitId = 'mm',
+    now: () => number = () => Date.now()
+  ): SessionData {
     // 调用方必须显式传入确认标记（界面层先弹确认框），防止误覆盖旧检查点。
     if (requireConfirm !== true) {
       throw new Error('开始新会话前必须先清除并确认旧检查点。')
@@ -76,6 +82,7 @@ export class RegistrationStore {
       version: STORAGE_VERSION,
       sessionId: createSessionId(),
       createdAt: now(),
+      unit,
       steps: STEPS.map((step) => ({ ...step })),
       values: [],
       nextIndex: 0
@@ -86,8 +93,9 @@ export class RegistrationStore {
   }
 
   /**
-   * 提交当前步骤的 X、Y 偏移（字符串输入）。
-   * 只有两个值都合法时才推进并原子落盘；任一非法则原地拒绝，不写记录、不前进。
+   * 提交当前步骤的 X、Y 偏移（按会话锁定单位录入的字符串）。
+   * 单位层负责把输入校验并换算成毫米；只有两个值都合法时才推进并原子落盘，
+   * 任一非法则原地拒绝，不写记录、不前进。
    * 已完成全部八步或记录损坏时拒绝任何提交（已提交步骤不可回改）。
    */
   advance(
@@ -105,8 +113,8 @@ export class RegistrationStore {
       return { ok: false, errors: { x: '八步测量已全部完成，提交已锁定，不可回改。' } }
     }
 
-    const x = parseOffset(xRaw, 'X')
-    const y = parseOffset(yRaw, 'Y')
+    const x = parseUnitOffset(xRaw, 'X', session.unit)
+    const y = parseUnitOffset(yRaw, 'Y', session.unit)
     if (!x.ok || !y.ok) {
       return {
         ok: false,
@@ -164,7 +172,7 @@ export class RegistrationStore {
   }
 
   private persist(session: SessionData): void {
-    // 单次 setItem：会话编号、八步定义、已提交值与下一步索引(values.length) 原子写入。
+    // 单次 setItem：会话编号、录入单位、八步定义、已提交值与下一步索引 原子写入。
     this.kv.setItem(STORAGE_KEY, JSON.stringify(session))
   }
 
@@ -178,6 +186,7 @@ function cloneSession(session: SessionData): SessionData {
     version: session.version,
     sessionId: session.sessionId,
     createdAt: session.createdAt,
+    unit: session.unit,
     steps: session.steps.map((step) => ({ ...step })),
     values: session.values.map((m) => ({ ...m })),
     nextIndex: session.nextIndex

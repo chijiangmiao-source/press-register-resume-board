@@ -158,6 +158,68 @@ describe('开始新会话的确认时机', () => {
   })
 })
 
+describe('会话单位选择与锁定', () => {
+  it('起始页选择微米开始新会话：单位随检查点落盘并锁定', () => {
+    const u = useSession(store)
+    u.startNewSession('um')
+
+    expect(u.unit.value).toBe('um')
+    expect(u.session.value?.unit).toBe('um')
+    const persisted = JSON.parse(kv.getItem(STORAGE_KEY) as string) as SessionData
+    expect(persisted.unit).toBe('um')
+  })
+
+  it('缺省单位是毫米', () => {
+    const u = useSession(store)
+    u.startNewSession()
+    expect(u.unit.value).toBe('mm')
+  })
+
+  it('微米会话：非法微米输入报错，改为合法微米值后错误同步消失', async () => {
+    const u = useSession(store)
+    u.startNewSession('um')
+
+    u.draftX.value = '115'
+    u.draftY.value = '0'
+    u.submitCurrent()
+    expect(u.fieldError.x).toContain('10 µm')
+    expect(u.nextIndex.value).toBe(0)
+
+    // 毫米写法在微米会话中同样非法
+    u.draftX.value = '0.10'
+    await nextTick()
+    expect(u.fieldError.x).toBeTruthy()
+
+    // 改为合法微米值：错误消失，可提交推进
+    u.draftX.value = '120'
+    await nextTick()
+    expect(u.fieldError.x).toBeUndefined()
+    u.submitCurrent()
+    expect(u.nextIndex.value).toBe(1)
+    expect(u.session.value?.values[0]).toEqual({ x: 0.12, y: 0 })
+  })
+
+  it('结果页“开始新会话”只返回起始页：检查点原样保留，单位可重新选择', () => {
+    store.begin(true, 'um')
+    for (let i = 0; i < 8; i++) store.advance('0', '0')
+    const beforeText = kv.getItem(STORAGE_KEY)
+    const u = useSession(store)
+
+    u.openStartPanel()
+    expect(u.showStartPanel.value).toBe(true)
+    // 未清除任何数据，旧检查点（含微米单位）原样保留
+    expect(kv.getItem(STORAGE_KEY)).toBe(beforeText)
+    expect(u.session.value?.unit).toBe('um')
+
+    // 在起始页改选毫米开始新会话
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    u.startNewSession('mm')
+    expect(u.showStartPanel.value).toBe(false)
+    expect(u.unit.value).toBe('mm')
+    expect(u.nextIndex.value).toBe(0)
+  })
+})
+
 function loadKind(u: ReturnType<typeof useSession>): string {
   return u.loadState.value.kind
 }

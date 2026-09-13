@@ -292,19 +292,32 @@ test.describe('四色套准复测接力板', () => {
     for (let i = 0; i < 8; i++) await submitStep(page, '0.05', '-0.05')
     await expect(page.getByTestId('verdict-title')).toBeVisible()
 
-    // 在结果面板点“开始新会话”，取消确认：旧检查点必须原样保留
+    // 结果面板点“开始新会话”只返回起始页（可重新选择单位），不清除旧检查点、不弹确认
     const dismiss = (d: import('@playwright/test').Dialog) => d.dismiss()
     const accept = (d: import('@playwright/test').Dialog) => d.accept()
     const keptBefore = await page.evaluate((key) => localStorage.getItem(key), STORAGE_KEY)
-    setDialogHandler(page, dismiss)
+    let dialogSeen = false
+    setDialogHandler(page, (d) => {
+      dialogSeen = true
+      d.dismiss()
+    })
     await page.getByTestId('restart-after-finish').click()
-    await expect(page.getByTestId('result-panel')).toBeVisible()
+    await expect(page.getByTestId('start-panel')).toBeVisible()
+    await expect(page.getByTestId('unit-select')).toBeVisible()
+    expect(dialogSeen).toBe(false)
     const keptAfter = await page.evaluate((key) => localStorage.getItem(key), STORAGE_KEY)
     expect(keptAfter).toBe(keptBefore)
 
+    // 起始页取消确认：不开始新会话，旧检查点原样保留
+    setDialogHandler(page, dismiss)
+    await page.getByTestId('start-new').click()
+    await expect(page.getByTestId('start-panel')).toBeVisible()
+    const keptAfterDismiss = await page.evaluate((key) => localStorage.getItem(key), STORAGE_KEY)
+    expect(keptAfterDismiss).toBe(keptBefore)
+
     // 接受确认：清除旧检查点，回到第 1 步的新会话
     setDialogHandler(page, accept)
-    await page.getByTestId('restart-after-finish').click()
+    await page.getByTestId('start-new').click()
     await expect(page.getByTestId('step-no')).toHaveText('第 1 / 8 步')
     await expect(page.getByTestId('checkpoint-info')).toContainText('已完成 0 / 8 步')
     const fresh = await page.evaluate((key) => {

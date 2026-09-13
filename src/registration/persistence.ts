@@ -1,6 +1,7 @@
 import { STORAGE_VERSION, STEPS } from './steps'
 import { isValidStoredOffset } from './validation'
-import type { LoadState, Measurement, PlateId, CornerId, SessionData, StepDef } from './types'
+import { isUnitId } from './units'
+import type { LoadState, Measurement, PlateId, CornerId, SessionData, StepDef, UnitId } from './types'
 
 const PLATES: readonly PlateId[] = ['cyan', 'magenta']
 const CORNERS: readonly CornerId[] = ['tl', 'tr', 'br', 'bl']
@@ -80,6 +81,12 @@ export function parsePersistedRecord(raw: unknown): LoadState {
   if (!isRepresentableTime(data.createdAt)) {
     return invalid('本地检查点创建时间损坏（超出日期可表示范围），已阻断续作。')
   }
+  // 录入单位随检查点落盘：缺失时按毫米恢复（兼容旧记录）；
+  // 存在但取值非法则按损坏处理，不能以猜测的单位续作。
+  if ('unit' in data && !isUnitId(data.unit)) {
+    return invalid('本地检查点的录入单位取值非法，已阻断续作。')
+  }
+  const unit: UnitId = isUnitId(data.unit) ? data.unit : 'mm'
   if (!Array.isArray(data.steps) || data.steps.length !== STEPS.length) {
     return invalid('本地检查点的八步定义缺失或数量不对，已阻断续作。')
   }
@@ -116,6 +123,7 @@ export function parsePersistedRecord(raw: unknown): LoadState {
     version: data.version,
     sessionId: data.sessionId,
     createdAt: data.createdAt,
+    unit,
     steps: data.steps.map((s) => ({ ...(s as StepDef) })),
     values: data.values.map((m) => ({ ...(m as Measurement) })),
     nextIndex: data.nextIndex

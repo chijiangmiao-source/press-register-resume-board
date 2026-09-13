@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { STEPS } from '../registration/steps'
-import { cornerLabel, formatOffset, plateLabel } from '../registration/format'
-import type { Measurement } from '../registration/types'
+import { cornerLabel, plateLabel } from '../registration/format'
+import { formatUnitOffset, UNIT_SYMBOL } from '../registration/units'
+import type { Measurement, UnitId } from '../registration/types'
 
 const props = defineProps<{
   values: Measurement[]
+  unit: UnitId
 }>()
 
 const rows = computed(() =>
@@ -15,6 +17,7 @@ const rows = computed(() =>
     measurement
   }))
 )
+const symbol = computed(() => UNIT_SYMBOL[props.unit])
 </script>
 
 <template>
@@ -26,8 +29,8 @@ const rows = computed(() =>
           <th>步</th>
           <th>色版</th>
           <th>角点</th>
-          <th class="num">X (mm)</th>
-          <th class="num">Y (mm)</th>
+          <th class="num">X ({{ symbol }})</th>
+          <th class="num">Y ({{ symbol }})</th>
         </tr>
       </thead>
       <tbody>
@@ -35,8 +38,8 @@ const rows = computed(() =>
           <td>{{ row.index + 1 }}</td>
           <td>{{ plateLabel(row.step.plate) }}</td>
           <td>{{ cornerLabel(row.step.corner) }}</td>
-          <td class="num">{{ formatOffset(row.measurement.x) }}</td>
-          <td class="num">{{ formatOffset(row.measurement.y) }}</td>
+          <td class="num">{{ formatUnitOffset(row.measurement.x, unit) }}</td>
+          <td class="num">{{ formatUnitOffset(row.measurement.y, unit) }}</td>
         </tr>
       </tbody>
     </table>

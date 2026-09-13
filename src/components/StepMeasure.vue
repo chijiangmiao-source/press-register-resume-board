@@ -1,13 +1,16 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { STEPS, OFFSET_MIN, OFFSET_MAX, TOLERANCE } from '../registration/steps'
+import { STEPS, TOLERANCE } from '../registration/steps'
 import { cornerLabel, plateLabel } from '../registration/format'
+import { formatUnitMagnitude, unitRangeText, UNIT_SYMBOL } from '../registration/units'
+import type { UnitId } from '../registration/types'
 
 const props = defineProps<{
   nextIndex: number
   draftX: string
   draftY: string
   fieldError: { x?: string; y?: string }
+  unit: UnitId
 }>()
 
 const emit = defineEmits<{
@@ -18,6 +21,11 @@ const emit = defineEmits<{
 
 const step = computed(() => STEPS[props.nextIndex])
 const canSubmit = computed(() => props.draftX.trim() !== '' && props.draftY.trim() !== '')
+const symbol = computed(() => UNIT_SYMBOL[props.unit])
+const rangeText = computed(() => unitRangeText(props.unit))
+const toleranceText = computed(() => formatUnitMagnitude(TOLERANCE, props.unit))
+const placeholder = computed(() => (props.unit === 'um' ? '如 50' : '如 0.05'))
+const placeholderY = computed(() => (props.unit === 'um' ? '如 -100' : '如 -0.10'))
 </script>
 
 <template>
@@ -28,17 +36,17 @@ const canSubmit = computed(() => props.draftX.trim() !== '' && props.draftY.trim
         {{ plateLabel(step.plate) }} · {{ cornerLabel(step.corner) }}
       </span>
     </div>
-    <p class="hint">录入相对黑版偏移，范围 {{ OFFSET_MIN.toFixed(2) }} ~ {{ OFFSET_MAX.toFixed(2) }} mm。</p>
+    <p class="hint" data-testid="range-hint">录入相对黑版偏移，范围 {{ rangeText }}。</p>
 
     <form class="offset-form" @submit.prevent="emit('submit')">
       <label class="field">
-        <span class="field-label">X 偏移 (mm)</span>
+        <span class="field-label">X 偏移 ({{ symbol }})</span>
         <input
           :value="draftX"
           type="text"
           inputmode="decimal"
           autocomplete="off"
-          placeholder="如 0.05"
+          :placeholder="placeholder"
           data-testid="input-x"
           :aria-invalid="Boolean(fieldError.x)"
           @input="emit('update:draftX', ($event.target as HTMLInputElement).value)"
@@ -47,13 +55,13 @@ const canSubmit = computed(() => props.draftX.trim() !== '' && props.draftY.trim
       </label>
 
       <label class="field">
-        <span class="field-label">Y 偏移 (mm)</span>
+        <span class="field-label">Y 偏移 ({{ symbol }})</span>
         <input
           :value="draftY"
           type="text"
           inputmode="decimal"
           autocomplete="off"
-          placeholder="如 -0.10"
+          :placeholder="placeholderY"
           data-testid="input-y"
           :aria-invalid="Boolean(fieldError.y)"
           @input="emit('update:draftY', ($event.target as HTMLInputElement).value)"
@@ -70,6 +78,8 @@ const canSubmit = computed(() => props.draftX.trim() !== '' && props.draftY.trim
         提交并进入下一步
       </button>
     </form>
-    <p class="hint tolerance-hint">放行阈值：|X|、|Y| 均 ≤ {{ TOLERANCE.toFixed(2) }} mm。已提交步骤不可回改。</p>
+    <p class="hint tolerance-hint" data-testid="tolerance-hint">
+      放行阈值：|X|、|Y| 均 ≤ {{ toleranceText }} {{ symbol }}。已提交步骤不可回改。
+    </p>
   </section>
 </template>

@@ -1,16 +1,26 @@
 <script setup lang="ts">
-import { cornerLabel, formatOffset, plateLabel } from '../registration/format'
-import type { Verdict } from '../registration/types'
+import { computed } from 'vue'
+import { TOLERANCE } from '../registration/steps'
+import { RESIDUAL_LIMIT, ADJUST_STEP } from '../registration/diagnosis'
+import { cornerLabel, plateLabel } from '../registration/format'
+import { formatUnitMagnitude, formatUnitOffset, UNIT_SYMBOL } from '../registration/units'
+import type { UnitId, Verdict } from '../registration/types'
 import type { RegistrationDiagnosis } from '../registration/diagnosis'
 
-defineProps<{
+const props = defineProps<{
   verdict: Verdict
   diagnosis?: RegistrationDiagnosis
+  unit: UnitId
 }>()
 
 const emit = defineEmits<{
   restart: []
 }>()
+
+const symbol = computed(() => UNIT_SYMBOL[props.unit])
+const toleranceText = computed(() => formatUnitMagnitude(TOLERANCE, props.unit))
+const residualLimitText = computed(() => formatUnitMagnitude(RESIDUAL_LIMIT, props.unit))
+const adjustStepText = computed(() => formatUnitMagnitude(ADJUST_STEP, props.unit))
 </script>
 
 <template>
@@ -24,12 +34,12 @@ const emit = defineEmits<{
     </h2>
 
     <p v-if="verdict.pass" class="verdict-detail" data-testid="verdict-detail">
-      八步共 16 个偏移量绝对值均不大于 0.15 mm，四色套准复测通过。
+      八步共 16 个偏移量绝对值均不大于 {{ toleranceText }} {{ symbol }}，四色套准复测通过。
     </p>
 
     <template v-else>
       <p class="verdict-detail" data-testid="verdict-detail">
-        以下色版角点偏移超出 0.15 mm 阈值（按测量顺序）：
+        以下色版角点偏移超出 {{ toleranceText }} {{ symbol }} 阈值（按测量顺序）：
       </p>
       <ul class="deviation-list" data-testid="deviation-list">
         <li
@@ -44,13 +54,13 @@ const emit = defineEmits<{
           </span>
           <span class="deviation-values">
             <template v-if="d.axes.includes('x')">
-              <strong :class="Math.abs(d.measurement.x) > 0.15 ? 'axis-bad' : ''">
-                X = {{ formatOffset(d.measurement.x) }} mm
+              <strong :class="Math.abs(d.measurement.x) > TOLERANCE ? 'axis-bad' : ''">
+                X = {{ formatUnitOffset(d.measurement.x, unit) }} {{ symbol }}
               </strong>
             </template>
             <template v-if="d.axes.includes('x') && d.axes.includes('y')">；</template>
             <template v-if="d.axes.includes('y')">
-              <strong class="axis-bad">Y = {{ formatOffset(d.measurement.y) }} mm</strong>
+              <strong class="axis-bad">Y = {{ formatUnitOffset(d.measurement.y, unit) }} {{ symbol }}</strong>
             </template>
           </span>
         </li>
@@ -63,7 +73,9 @@ const emit = defineEmits<{
         data-testid="plate-diagnosis"
         aria-label="逐版校正建议"
       >
-        <h3 class="diagnosis-title">逐版校正建议（四角平均偏移与残差判定，残差阈值 0.05 mm）</h3>
+        <h3 class="diagnosis-title">
+          逐版校正建议（四角平均偏移与残差判定，残差阈值 {{ residualLimitText }} {{ symbol }}）
+        </h3>
         <ul class="diagnosis-list">
           <li
             v-for="p in diagnosis.plates"
@@ -75,7 +87,7 @@ const emit = defineEmits<{
             <p class="diagnosis-plate">
               <strong>{{ plateLabel(p.plate) }}</strong>
               <span class="diagnosis-mean" :data-testid="`diagnosis-mean-${p.plate}`">
-                四角平均偏移：X = {{ formatOffset(p.meanX) }} mm，Y = {{ formatOffset(p.meanY) }} mm
+                四角平均偏移：X = {{ formatUnitOffset(p.meanX, unit) }} {{ symbol }}，Y = {{ formatUnitOffset(p.meanY, unit) }} {{ symbol }}
               </span>
             </p>
             <p v-if="p.uniform" class="diagnosis-advice">
@@ -84,13 +96,13 @@ const emit = defineEmits<{
               </span>
               建议整版
               <span class="advice-axis" :data-testid="`advice-x-${p.plate}`">
-                X 调 {{ formatOffset(p.advice!.x) }} mm
+                X 调 {{ formatUnitOffset(p.advice!.x, unit) }} {{ symbol }}
               </span>
               、
               <span class="advice-axis" :data-testid="`advice-y-${p.plate}`">
-                Y 调 {{ formatOffset(p.advice!.y) }} mm
+                Y 调 {{ formatUnitOffset(p.advice!.y, unit) }} {{ symbol }}
               </span>
-              （与平均偏移方向相反，按 0.01 mm 给出）。
+              （与平均偏移方向相反，按 {{ adjustStepText }} {{ symbol }} 给出）。
             </p>
             <p v-else class="diagnosis-advice">
               <span class="diagnosis-kind" :data-testid="`diagnosis-kind-${p.plate}`">

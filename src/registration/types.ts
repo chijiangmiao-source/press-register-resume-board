@@ -1,6 +1,12 @@
 /** 被测色版：本接力板只复测青版与品红版（黑版为基准版）。 */
 export type PlateId = 'cyan' | 'magenta'
 
+/**
+ * 录入单位：毫米或微米。会话开始时选定并随检查点锁定，
+ * 进行中的会话不可中途更改，避免同一批读数被两种单位误读。
+ */
+export type UnitId = 'mm' | 'um'
+
 /** 角点顺序固定为：左上 → 右上 → 右下 → 左下。 */
 export type CornerId = 'tl' | 'tr' | 'br' | 'bl'
 
@@ -41,6 +47,12 @@ export interface SessionData {
   sessionId: string
   /** 创建时间（毫秒时间戳）。 */
   createdAt: number
+  /**
+   * 会话锁定的录入单位，随检查点原子落盘。
+   * 存储与计算始终以毫米进行，该字段只决定录入与展示的换算；
+   * 旧记录缺省该字段时按毫米恢复。
+   */
+  unit: UnitId
   /** 八步固定定义冗余存档，恢复时与现行定义逐一核对。 */
   steps: StepDef[]
   /** 已提交值，顺序即测量顺序。 */

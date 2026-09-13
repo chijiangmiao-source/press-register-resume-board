@@ -37,6 +37,7 @@ function validRecord(overrides: Partial<SessionData> = {}): SessionData {
     version: STORAGE_VERSION,
     sessionId: 's1',
     createdAt: 1,
+    unit: 'mm',
     steps: STEPS.map((s) => ({ ...s })),
     values: [],
     nextIndex: 0,
@@ -57,18 +58,36 @@ describe('空仓库与新会话', () => {
   })
 
   it('开始新会话必须显式确认，且创建八步定义、nextIndex=0', () => {
-    const session = store.begin(true, () => 1_700_000_000_000)
+    const session = store.begin(true, 'mm', () => 1_700_000_000_000)
     expect(session.sessionId).toBeTruthy()
     expect(session.version).toBe(STORAGE_VERSION)
     expect(session.createdAt).toBe(1_700_000_000_000)
+    expect(session.unit).toBe('mm')
     expect(session.steps).toHaveLength(8)
     expect(session.values).toEqual([])
     expect(session.nextIndex).toBe(0)
     expect(store.nextIndex).toBe(0)
     const persisted = kv.raw() as SessionData
+    expect(persisted.unit).toBe('mm')
     expect(persisted.steps).toHaveLength(8)
     expect(persisted.values).toEqual([])
     expect(persisted.nextIndex).toBe(0)
+  })
+
+  it('开始新会话缺省单位为毫米，并随检查点原子落盘', () => {
+    const session = store.begin(true)
+    expect(session.unit).toBe('mm')
+    expect((kv.raw() as SessionData).unit).toBe('mm')
+  })
+
+  it('可选择微米开始新会话，单位随检查点一次原子写入', () => {
+    const writesBefore = kv.writes
+    const session = store.begin(true, 'um')
+    expect(session.unit).toBe('um')
+    expect(kv.writes).toBe(writesBefore + 1)
+    const persisted = kv.raw() as SessionData
+    expect(persisted.unit).toBe('um')
+    expect(persisted.version).toBe(STORAGE_VERSION)
   })
 
   it('会话编号、步骤定义与写入落盘', () => {
@@ -478,9 +497,9 @@ describe('复调诊断（八步完成后基于只读测量值生成）', () => {
     for (let i = 0; i < 8; i++) store.advance('0.20', '0.00')
     const before = kv.getItem(STORAGE_KEY)
     const parsedBefore = JSON.parse(before as string) as Record<string, unknown>
-    // 既有 v2 结构只有这六个字段，诊断不允许落盘任何新字段。
+    // v2 结构固定为这七个字段（含录入单位），诊断不允许落盘任何新字段。
     expect(Object.keys(parsedBefore).sort()).toEqual(
-      ['createdAt', 'nextIndex', 'sessionId', 'steps', 'values', 'version'].sort()
+      ['createdAt', 'nextIndex', 'sessionId', 'steps', 'unit', 'values', 'version'].sort()
     )
     expect(parsedBefore.version).toBe(STORAGE_VERSION)
 
@@ -488,4 +507,150 @@ describe('复调诊断（八步完成后基于只读测量值生成）', () => {
     store.getDiagnosis()
     expect(kv.getItem(STORAGE_KEY)).toBe(before)
   })
+})
+
+describe('微米会话：录入校验与毫米换算', () => {
+  beforeEach(() => {
+    store.begin(true, 'um')
+  })
+
+  it('微米输入按 10 µm 步进校验并换算成毫米落盘（0.01 mm 精度）', () => {
+    const r = store.advance('120', '-50')
+    expect(r.ok).toBe(true)
+    expect(store.nextIndex).toBe(1)
+    const persisted = kv.raw() as SessionData
+    // 落盘只有毫米：120 µm -> 0.12 mm，-50 µm -> -0.05 mm
+    expect(persisted.values).toEqual([{ x: 0.12, y: -0.05 }])
+    expect(persisted.unit).toBe('um')
+    expect(persisted.nextIndex).toBe(1)
+  })
+
+  it('边界 ±2000 µm 恰好可提交，换算为 ±2 mm', () => {
+    expect(store.advance('2000', '-2000').ok).toBe(true)
+    expect((kv.raw() as SessionData).values).toEqual([{ x: 2, y: -2 }])
+  })
+
+  it.each([
+    ['115', '0', '10 µm'],
+    ['0', '-5', '10 µm'],
+    ['2010', '0', '范围'],
+    ['0', '-2010', '范围'],
+    ['0.10', '0', '整数'],
+    ['abc', '0', '整数'],
+    ['', '0', '必填'],
+    ['0', '']
+  ])('微米非法输入原地拒绝：(%s, %s)', (x, y, hint?: string) => {
+    const writesBefore = kv.writes
+    const r = store.advance(x, y)
+    expect(r.ok).toBe(false)
+    if (!r.ok && hint) {
+      expect(r.errors.x ?? r.errors.y).toContain(hint)
+    }
+    // 不推进、不写盘：刷新后仍停在原步骤
+    expect(store.nextIndex).toBe(0)
+    expect(kv.writes).toBe(writesBefore)
+    const persisted = kv.raw() as SessionData
+    expect(persisted.values).toEqual([])
+    expect(persisted.nextIndex).toBe(0)
+  })
+
+  it('单位锁定：微米会话中毫米写法（小数）一律拒绝', () => {
+    const r = store.advance('0.10', '0.10')
+    expect(r.ok).toBe(false)
+    expect(store.nextIndex).toBe(0)
+  })
+
+  it('微米会话走完八步，结论与诊断仍按毫米计算且数值等价', () => {
+    // 与毫米用例完全相同的物理量：青版四角一致 +0.20 mm，品红版三角 +0.01 mm、末角 +0.20 mm
+    const inputs: Array<[string, string]> = [
+      ['200', '0'],
+      ['200', '0'],
+      ['200', '0'],
+      ['200', '0'],
+      ['10', '0'],
+      ['10', '0'],
+      ['10', '0'],
+      ['200', '0']
+    ]
+    for (const [x, y] of inputs) expect(store.advance(x, y).ok).toBe(true)
+
+    const verdict = store.getVerdict()
+    expect(verdict?.pass).toBe(false)
+    expect(verdict?.deviations.map((d) => d.step.index)).toEqual([0, 1, 2, 3, 7])
+    expect(verdict?.deviations[0].measurement).toEqual({ x: 0.2, y: 0 })
+
+    const diag = store.getDiagnosis()
+    expect(diag?.plates[0].uniform).toBe(true)
+    expect(diag?.plates[0].advice).toEqual({ x: -0.2, y: 0 })
+    expect(diag?.plates[1].uniform).toBe(false)
+    expect(diag?.plates[1].advice).toBeNull()
+  })
+})
+
+describe('单位随检查点恢复', () => {
+  it('微米会话中途刷新：单位、读数（毫米）与下一步索引原样恢复', () => {
+    store.begin(true, 'um')
+    store.advance('120', '-50')
+    store.advance('0', '200')
+
+    const reopened = makeStore()
+    const session = reopened.getSession()
+    expect(session?.unit).toBe('um')
+    expect(session?.values).toEqual([
+      { x: 0.12, y: -0.05 },
+      { x: 0, y: 0.2 }
+    ])
+    expect(reopened.nextIndex).toBe(2)
+  })
+
+  it('恢复后的微米会话继续按微米校验推进', () => {
+    store.begin(true, 'um')
+    store.advance('100', '0')
+    const reopened = makeStore()
+    // 非法微米输入仍被拒绝
+    expect(reopened.advance('15', '0').ok).toBe(false)
+    expect(reopened.nextIndex).toBe(1)
+    // 合法输入继续推进并换算落盘
+    expect(reopened.advance('-30', '40').ok).toBe(true)
+    expect(reopened.getSession()?.values[1]).toEqual({ x: -0.03, y: 0.04 })
+  })
+
+  it('未含 unit 字段的旧有效记录按毫米载入，版本号不变', () => {
+    const legacy: Record<string, unknown> = {
+      ...validRecord({ values: [{ x: 0.1, y: -0.05 }], nextIndex: 1 })
+    }
+    delete legacy.unit
+    kv.data.set(STORAGE_KEY, JSON.stringify(legacy))
+
+    const reopened = makeStore()
+    const state = reopened.getState()
+    expect(state.kind).toBe('ready')
+    const session = reopened.getSession()
+    expect(session?.unit).toBe('mm')
+    expect(session?.version).toBe(STORAGE_VERSION)
+    expect(session?.values).toEqual([{ x: 0.1, y: -0.05 }])
+    expect(reopened.nextIndex).toBe(1)
+    // 按毫米继续推进
+    expect(reopened.advance('0.05', '0.00').ok).toBe(true)
+    expect(reopened.nextIndex).toBe(2)
+  })
+
+  it.each([['inch'], ['UM'], [''], [0], [null], [true]])(
+    'unit 取值非法（%s）：报错并阻断，不猜测单位',
+    (badUnit) => {
+      const record: Record<string, unknown> = {
+        ...validRecord({ values: [{ x: 0, y: 0 }], nextIndex: 1 })
+      }
+      record.unit = badUnit
+      kv.data.set(STORAGE_KEY, JSON.stringify(record))
+
+      const reopened = makeStore()
+      const state = reopened.getState()
+      expect(state.kind).toBe('error')
+      if (state.kind === 'error') expect(state.message).toContain('单位')
+      expect(reopened.getSession()).toBeUndefined()
+      expect(reopened.nextIndex).toBe(-1)
+      expect(reopened.advance('0.10', '0.10').ok).toBe(false)
+    }
+  )
 })
